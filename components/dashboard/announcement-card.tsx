@@ -30,12 +30,36 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
   const [videoLink, setVideoLink] = useState("");
   const [date, setDate] = useState<Date | undefined>(undefined);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date) return;
-    // Handle announcement submission here
-    const formattedDate = date.toISOString().split("T")[0];
-    console.log("Announcement submitted:", { message, videoLink, date: formattedDate });
+    if (!date || !message) return;
+
+    try {
+      const formattedDate = date.toISOString().split("T")[0];
+
+      // Call the API to create announcement
+      const response = await fetch('/api/announcements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+          message: message,
+          date: formattedDate
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert('Announcement created successfully!');
+      } else {
+        alert('Failed to create announcement: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error creating announcement:', error);
+      alert('Failed to create announcement');
+    }
+
     // Reset form and close dialog
     setMessage("");
     setVideoLink("");
