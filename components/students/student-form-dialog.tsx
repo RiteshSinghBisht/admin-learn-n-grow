@@ -47,6 +47,7 @@ export function StudentFormDialog({
   const [batch, setBatch] = React.useState<StudentBatch>("morning");
   const [monthlyFee, setMonthlyFee] = React.useState("3000");
   const [joinDate, setJoinDate] = React.useState(getToday());
+  const [teacher, setTeacher] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
 
   const isEdit = Boolean(initialData);
@@ -60,6 +61,7 @@ export function StudentFormDialog({
       setBatch(initialData.batch);
       setMonthlyFee(String(initialData.monthlyFee));
       setJoinDate(initialData.joinDate);
+      setTeacher(initialData.teacher || "");
       return;
     }
 
@@ -68,6 +70,7 @@ export function StudentFormDialog({
     setBatch("morning");
     setMonthlyFee("3000");
     setJoinDate(getToday());
+    setTeacher("");
   }, [open, initialData]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -95,6 +98,7 @@ export function StudentFormDialog({
         joinDate,
         status: initialData?.status,
         monthlyFee: numericMonthlyFee,
+        teacher: teacher.trim() || undefined,
       });
       onOpenChange(false);
     } finally {
@@ -167,6 +171,16 @@ export function StudentFormDialog({
               value={joinDate}
               onChange={(event) => setJoinDate(event.target.value)}
               required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="student-teacher">Teacher</Label>
+            <Input
+              id="student-teacher"
+              value={teacher}
+              onChange={(event) => setTeacher(event.target.value)}
+              placeholder="Assign a teacher (optional)"
             />
           </div>
 

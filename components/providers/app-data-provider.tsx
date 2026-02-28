@@ -68,11 +68,62 @@ function formatMonthLabel(monthKey: string) {
 }
 
 export function AppDataProvider({ children }: AppDataProviderProps) {
-  const { isAuthEnabled, loading: authLoading, user } = useAuth();
+  const { isAuthEnabled, loading: authLoading, user, role, assignedTeachers } = useAuth();
   const [snapshot, setSnapshot] = React.useState<AppDataSnapshot>(defaultSnapshot);
   const [loading, setLoading] = React.useState(true);
   const [currentMonthKey, setCurrentMonthKey] = React.useState(() => formatMonthKey(new Date()));
   const isSeedingMonthlyDuesRef = React.useRef(false);
+
+  const applyRoleScope = React.useCallback(
+    (nextSnapshot: AppDataSnapshot): AppDataSnapshot => {
+      if (!isAuthEnabled || role !== "students_only") {
+        return nextSnapshot;
+      }
+
+      const allowedTeachers = new Set(
+        assignedTeachers
+          .map((item) => item.trim().toLowerCase())
+          .filter((item) => item.length > 0),
+      );
+
+      if (!allowedTeachers.size) {
+        return {
+          ...nextSnapshot,
+          students: [],
+          attendance: [],
+          finances: [],
+        };
+      }
+
+      const students = nextSnapshot.students.filter((student) => {
+        const teacher = student.teacher?.trim().toLowerCase();
+        return Boolean(teacher && allowedTeachers.has(teacher));
+      });
+
+      const allowedStudentIds = new Set(students.map((student) => student.id));
+
+      const attendance = nextSnapshot.attendance.filter((item) => {
+        if (allowedStudentIds.has(item.studentId)) {
+          return true;
+        }
+
+        const teacher = item.teacher?.trim().toLowerCase();
+        return Boolean(teacher && allowedTeachers.has(teacher));
+      });
+
+      const finances = nextSnapshot.finances.filter((item) =>
+        item.studentId ? allowedStudentIds.has(item.studentId) : false,
+      );
+
+      return {
+        ...nextSnapshot,
+        students,
+        attendance,
+        finances,
+      };
+    },
+    [assignedTeachers, isAuthEnabled, role],
+  );
 
   React.useEffect(() => {
     let isMounted = true;
@@ -82,7 +133,7 @@ export function AppDataProvider({ children }: AppDataProviderProps) {
       try {
         const nextSnapshot = await dataService.getInitialSnapshot();
         if (isMounted) {
-          setSnapshot(nextSnapshot);
+          setSnapshot(applyRoleScope(nextSnapshot));
         }
       } catch (error) {
         if (isMounted) {
@@ -119,7 +170,11 @@ export function AppDataProvider({ children }: AppDataProviderProps) {
     return () => {
       isMounted = false;
     };
-  }, [authLoading, isAuthEnabled, user?.id]);
+  }, [applyRoleScope, authLoading, isAuthEnabled, user?.id]);
+
+  React.useEffect(() => {
+    setSnapshot((prev) => applyRoleScope(prev));
+  }, [applyRoleScope]);
 
   React.useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -135,93 +190,128 @@ export function AppDataProvider({ children }: AppDataProviderProps) {
   const addStudent = React.useCallback(async (input: StudentFormInput) => {
     const student = await dataService.addStudent(input);
     setSnapshot((prev) => ({
-      ...prev,
-      students: [student, ...prev.students],
+      ...applyRoleScope({
+        ...prev,
+        students: [student, ...prev.students],
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const updateStudent = React.useCallback(async (id: string, input: StudentFormInput) => {
     const updated = await dataService.updateStudent(id, input);
     setSnapshot((prev) => ({
-      ...prev,
-      students: prev.students.map((student) => (student.id === id ? updated : student)),
+      ...applyRoleScope({
+        ...prev,
+        students: prev.students.map((student) => (student.id === id ? updated : student)),
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const deleteStudent = React.useCallback(async (id: string) => {
     await dataService.deleteStudent(id);
     setSnapshot((prev) => ({
-      ...prev,
-      students: prev.students.filter((student) => student.id !== id),
-      attendance: prev.attendance.filter((item) => item.studentId !== id),
-      finances: prev.finances.map((item) =>
-        item.studentId === id ? { ...item, studentId: null } : item,
-      ),
+      ...applyRoleScope({
+        ...prev,
+        students: prev.students.filter((student) => student.id !== id),
+        attendance: prev.attendance.filter((item) => item.studentId !== id),
+        finances: prev.finances.map((item) =>
+          item.studentId === id ? { ...item, studentId: null } : item,
+        ),
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const addTransaction = React.useCallback(async (input: TransactionFormInput) => {
     const transaction = await dataService.addTransaction(input);
     setSnapshot((prev) => ({
-      ...prev,
-      finances: [transaction, ...prev.finances],
+      ...applyRoleScope({
+        ...prev,
+        finances: [transaction, ...prev.finances],
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const updateTransaction = React.useCallback(
     async (id: string, input: TransactionFormInput) => {
       const updated = await dataService.updateTransaction(id, input);
       setSnapshot((prev) => ({
-        ...prev,
-        finances: prev.finances.map((item) => (item.id === id ? updated : item)),
+        ...applyRoleScope({
+          ...prev,
+          finances: prev.finances.map((item) => (item.id === id ? updated : item)),
+        }),
       }));
     },
-    [],
+    [applyRoleScope],
   );
 
   const deleteTransaction = React.useCallback(async (id: string) => {
     await dataService.deleteTransaction(id);
     setSnapshot((prev) => ({
-      ...prev,
-      finances: prev.finances.filter((item) => item.id !== id),
+      ...applyRoleScope({
+        ...prev,
+        finances: prev.finances.filter((item) => item.id !== id),
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const toggleTransactionStatus = React.useCallback(async (id: string) => {
     const updated = await dataService.toggleTransactionStatus(id);
     setSnapshot((prev) => ({
-      ...prev,
-      finances: prev.finances.map((item) => (item.id === id ? updated : item)),
+      ...applyRoleScope({
+        ...prev,
+        finances: prev.finances.map((item) => (item.id === id ? updated : item)),
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const saveAttendance = React.useCallback(async (date: string, entries: AttendanceDraft[]) => {
     const saved = await dataService.saveAttendance(date, entries);
     setSnapshot((prev) => ({
-      ...prev,
-      attendance: [...prev.attendance.filter((item) => item.attendanceDate !== date), ...saved],
+      ...applyRoleScope({
+        ...prev,
+        attendance: [...prev.attendance.filter((item) => item.attendanceDate !== date), ...saved],
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const getAttendanceForDate = React.useCallback(
-    (date: string) => snapshot.attendance.filter((item) => item.attendanceDate === date),
+    (date: string) => {
+      const byStudent = new Map<string, AttendanceRecord>();
+      snapshot.attendance.forEach((item) => {
+        if (item.attendanceDate !== date) {
+          return;
+        }
+
+        // Keep first record encountered for a student/date (latest in current ordering).
+        if (!byStudent.has(item.studentId)) {
+          byStudent.set(item.studentId, item);
+        }
+      });
+      return Array.from(byStudent.values());
+    },
     [snapshot.attendance],
   );
 
   const updateProfile = React.useCallback(async (input: BusinessProfile) => {
     const updated = await dataService.updateProfile(input);
     setSnapshot((prev) => ({
-      ...prev,
-      profile: updated,
+      ...applyRoleScope({
+        ...prev,
+        profile: updated,
+      }),
     }));
-  }, []);
+  }, [applyRoleScope]);
 
   const resetAllData = React.useCallback(async () => {
     const nextSnapshot = await dataService.resetAllData();
-    setSnapshot(nextSnapshot);
-  }, []);
+    setSnapshot(applyRoleScope(nextSnapshot));
+  }, [applyRoleScope]);
 
   const ensureCurrentMonthStudentDues = React.useCallback(async () => {
+    if (isAuthEnabled && role !== "admin") {
+      return;
+    }
+
     if (loading || isSeedingMonthlyDuesRef.current) {
       return;
     }
@@ -263,13 +353,15 @@ export function AppDataProvider({ children }: AppDataProviderProps) {
       );
 
       setSnapshot((prev) => ({
-        ...prev,
-        finances: [...createdTransactions, ...prev.finances],
+        ...applyRoleScope({
+          ...prev,
+          finances: [...createdTransactions, ...prev.finances],
+        }),
       }));
     } finally {
       isSeedingMonthlyDuesRef.current = false;
     }
-  }, [loading, snapshot.students, snapshot.finances, currentMonthKey]);
+  }, [applyRoleScope, currentMonthKey, isAuthEnabled, loading, role, snapshot.finances, snapshot.students]);
 
   React.useEffect(() => {
     void ensureCurrentMonthStudentDues();

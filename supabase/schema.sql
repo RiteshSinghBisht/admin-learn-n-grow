@@ -25,6 +25,7 @@ create table public.students (
   join_date date not null default current_date,
   status text not null default 'active' check (status in ('active', 'inactive')),
   monthly_fee numeric(12,2) not null default 3000 check (monthly_fee >= 0),
+  teacher text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -52,6 +53,7 @@ create table public.attendance (
   student_id bigint not null references public.students(id) on delete cascade,
   student_name text not null,
   batch text not null default 'morning' check (batch in ('morning', 'evening')),
+  teacher text,
   attendance_date date not null,
   status text not null check (status in ('present', 'absent')),
   note text,
@@ -63,17 +65,35 @@ create table public.attendance (
 create table if not exists public.app_user_roles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   role text not null check (role in ('admin', 'students_only')),
+  assigned_teachers text[] not null default '{}'::text[],
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.app_user_roles
+  add column if not exists assigned_teachers text[] not null default '{}'::text[];
+
+update public.app_user_roles
+set assigned_teachers = '{}'::text[]
+where assigned_teachers is null;
+
+alter table public.app_user_roles
+  drop constraint if exists app_user_roles_role_check;
+
+alter table public.app_user_roles
+  add constraint app_user_roles_role_check
+  check (role in ('admin', 'students_only'));
 
 create index if not exists idx_finances_date on public.finances(transaction_date);
 create index if not exists idx_finances_type on public.finances(type);
 create index if not exists idx_attendance_date on public.attendance(attendance_date);
 create index if not exists idx_attendance_batch_date on public.attendance(batch, attendance_date);
+create index if not exists idx_attendance_teacher_date on public.attendance(teacher, attendance_date);
 create index if not exists idx_students_status on public.students(status);
 create index if not exists idx_students_batch on public.students(batch);
+create index if not exists idx_students_teacher on public.students(teacher);
 create index if not exists idx_app_user_roles_role on public.app_user_roles(role);
+create index if not exists idx_app_user_roles_assigned_teachers on public.app_user_roles using gin (assigned_teachers);
 
 drop trigger if exists trg_students_updated_at on public.students;
 create trigger trg_students_updated_at
@@ -137,6 +157,7 @@ returns table (
   user_id uuid,
   email text,
   role text,
+  assigned_teachers text[],
   created_at timestamptz
 )
 language plpgsql
@@ -161,6 +182,7 @@ begin
     u.id::uuid as user_id,
     coalesce(u.email, '')::text as email,
     aur.role::text as role,
+    coalesce(aur.assigned_teachers, '{}'::text[])::text[] as assigned_teachers,
     u.created_at::timestamptz as created_at
   from auth.users u
   left join public.app_user_roles as aur on aur.user_id = u.id
@@ -173,12 +195,19 @@ revoke all on function public.list_manageable_users() from public;
 grant execute on function public.list_manageable_users() to authenticated;
 
 drop function if exists public.upsert_user_role(uuid, text);
-create or replace function public.upsert_user_role(p_user_id uuid, p_role text)
+drop function if exists public.upsert_user_role(uuid, text, text[]);
+create or replace function public.upsert_user_role(
+  p_user_id uuid,
+  p_role text,
+  p_assigned_teachers text[] default '{}'::text[]
+)
 returns void
 language plpgsql
 security definer
 set search_path = public, auth
 as $$
+declare
+  normalized_assigned_teachers text[] := '{}';
 begin
   if auth.uid() is null then
     raise exception 'Not authenticated';
@@ -204,24 +233,43 @@ begin
     raise exception 'User not found.';
   end if;
 
-  insert into public.app_user_roles (user_id, role)
-  values (p_user_id, p_role)
+  if p_role = 'students_only' then
+    select coalesce(array_agg(distinct trimmed_teacher), '{}'::text[])
+    into normalized_assigned_teachers
+    from (
+      select btrim(raw_teacher) as trimmed_teacher
+      from unnest(coalesce(p_assigned_teachers, '{}'::text[])) as raw_teacher
+    ) as normalized_teachers
+    where trimmed_teacher <> '';
+
+    if coalesce(array_length(normalized_assigned_teachers, 1), 0) = 0 then
+      raise exception 'At least one assigned teacher is required for Student Only access.';
+    end if;
+  end if;
+
+  insert into public.app_user_roles (user_id, role, assigned_teachers)
+  values (
+    p_user_id,
+    p_role,
+    case when p_role = 'students_only' then normalized_assigned_teachers else '{}'::text[] end
+  )
   on conflict (user_id)
   do update
   set
     role = excluded.role,
+    assigned_teachers = excluded.assigned_teachers,
     updated_at = now();
 end;
 $$;
 
-revoke all on function public.upsert_user_role(uuid, text) from public;
-grant execute on function public.upsert_user_role(uuid, text) to authenticated;
+revoke all on function public.upsert_user_role(uuid, text, text[]) from public;
+grant execute on function public.upsert_user_role(uuid, text, text[]) to authenticated;
 
 -- Example role assignment (run with SQL editor/service role):
--- insert into public.app_user_roles (user_id, role)
--- values ('<auth_user_uuid>', 'students_only')
+-- insert into public.app_user_roles (user_id, role, assigned_teachers)
+-- values ('<auth_user_uuid>', 'teacher', array['Neha Verma', 'Rahul Mehta'])
 -- on conflict (user_id)
--- do update set role = excluded.role, updated_at = now();
+-- do update set role = excluded.role, assigned_teachers = excluded.assigned_teachers, updated_at = now();
 
 -- Refresh PostgREST schema cache in Supabase after DDL changes
 notify pgrst, 'reload schema';

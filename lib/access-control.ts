@@ -7,7 +7,7 @@ export function isPublicPath(pathname: string) {
 }
 
 export function getDefaultPathForRole(role: AppRole) {
-  return role === "students_only" ? "/students" : "/";
+  return role === "admin" ? "/" : "/students";
 }
 
 export function canRoleAccessPath(role: AppRole, pathname: string) {

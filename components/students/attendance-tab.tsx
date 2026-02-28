@@ -35,6 +35,7 @@ import type {
 
 interface AttendanceTabProps {
   students: Student[];
+  attendance: AttendanceRecord[];
   getAttendanceForDate: (date: string) => AttendanceRecord[];
   onSaveAttendance: (date: string, entries: AttendanceDraft[]) => Promise<void>;
 }
@@ -124,6 +125,7 @@ function getMonthlyCellTooltip(cell: MonthlyDayCell) {
 
 export function AttendanceTab({
   students,
+  attendance,
   getAttendanceForDate,
   onSaveAttendance,
 }: AttendanceTabProps) {
@@ -135,6 +137,7 @@ export function AttendanceTab({
     monthValueFromDate(getNearestWeekday(new Date())),
   );
   const [selectedBatch, setSelectedBatch] = React.useState<StudentBatch>("morning");
+  const [selectedTeacher, setSelectedTeacher] = React.useState<string>("all");
   const [selectedStudentId, setSelectedStudentId] = React.useState<string | null>(null);
   const [statusMap, setStatusMap] = React.useState<Record<string, AttendanceStatus>>({});
   const [noteMap, setNoteMap] = React.useState<Record<string, string>>({});
@@ -144,12 +147,30 @@ export function AttendanceTab({
 
   const selectedDateKey = React.useMemo(() => toDateKey(selectedDate), [selectedDate]);
 
+  // Get unique teachers from students
+  const teachers = React.useMemo(() => {
+    const teacherSet = new Set<string>();
+    students.forEach((student) => {
+      if (student.teacher) {
+        teacherSet.add(student.teacher);
+      }
+    });
+    return Array.from(teacherSet).sort();
+  }, [students]);
+
   const activeBatchStudents = React.useMemo(
     () =>
       students
-        .filter((student) => student.status === "active" && student.batch === selectedBatch)
+        .filter((student) => {
+          // Filter by batch
+          if (student.batch !== selectedBatch) return false;
+          // Filter by teacher if selected
+          if (selectedTeacher !== "all" && student.teacher !== selectedTeacher) return false;
+          // Only active students
+          return student.status === "active";
+        })
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [students, selectedBatch],
+    [students, selectedBatch, selectedTeacher],
   );
 
   const existingRecordsForDate = React.useMemo(
@@ -169,6 +190,35 @@ export function AttendanceTab({
     () => activeBatchStudents.find((student) => student.id === selectedStudentId) ?? null,
     [activeBatchStudents, selectedStudentId],
   );
+
+  const monthOptions = React.useMemo(() => {
+    const monthSet = new Set<string>();
+    const targetStudentId = selectedStudent?.id;
+
+    attendance.forEach((record) => {
+      if (targetStudentId && record.studentId !== targetStudentId) {
+        return;
+      }
+      monthSet.add(record.attendanceDate.slice(0, 7));
+    });
+
+    return Array.from(monthSet)
+      .sort((a, b) => b.localeCompare(a))
+      .map((value) => ({
+        value,
+        label: format(parseMonthValue(value), "MMMM yyyy"),
+      }));
+  }, [attendance, selectedStudent?.id]);
+
+  React.useEffect(() => {
+    if (!monthOptions.length) {
+      return;
+    }
+
+    if (!monthOptions.some((option) => option.value === selectedMonth)) {
+      setSelectedMonth(monthOptions[0].value);
+    }
+  }, [monthOptions, selectedMonth]);
 
   const showSaveToast = React.useCallback((message: string, variant: SaveToastVariant) => {
     setSaveToast({ message, variant });
@@ -330,6 +380,7 @@ export function AttendanceTab({
         studentId: student.id,
         studentName: student.name,
         batch: student.batch,
+        teacher: student.teacher,
         status: statusMap[student.id] ?? "present",
         note: noteMap[student.id]?.trim() || undefined,
       }));
@@ -364,6 +415,20 @@ export function AttendanceTab({
             <SelectContent>
               <SelectItem value="morning">Morning Session</SelectItem>
               <SelectItem value="evening">Evening Session</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={selectedTeacher} onValueChange={setSelectedTeacher}>
+            <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectValue placeholder="All Teachers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Teachers</SelectItem>
+              {teachers.map((teacher) => (
+                <SelectItem key={teacher} value={teacher}>
+                  {teacher}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
@@ -457,7 +522,10 @@ export function AttendanceTab({
                   <TableCell className="font-medium">
                     <button
                       type="button"
-                      onClick={() => setSelectedStudentId(student.id)}
+                      onClick={() => {
+                        setSelectedStudentId(student.id);
+                        setSelectedMonth(monthValueFromDate(selectedDate));
+                      }}
                       className={cn(
                         "text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         isSelected ? "text-primary" : "text-foreground/95 hover:text-primary",
@@ -570,17 +638,34 @@ export function AttendanceTab({
                 <h3 className="text-base font-semibold">Student Attendance Calendar</h3>
                 <p className="text-sm text-muted-foreground">
                   {selectedStudent.name} • {formatBatchLabel(selectedStudent.batch)}
+                  {selectedStudent.teacher ? ` • ${selectedStudent.teacher}` : ""}
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Month</span>
-                <Input
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(event) => setSelectedMonth(event.target.value)}
-                  className="h-9 w-[170px]"
-                />
+                <Select
+                  value={monthOptions.some((option) => option.value === selectedMonth) ? selectedMonth : ""}
+                  onValueChange={setSelectedMonth}
+                  disabled={!monthOptions.length}
+                >
+                  <SelectTrigger className="h-9 w-[190px]">
+                    <SelectValue placeholder="Select month" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {monthOptions.length ? (
+                      monthOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-data" disabled>
+                        No attendance months
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 

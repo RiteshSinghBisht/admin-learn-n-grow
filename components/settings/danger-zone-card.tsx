@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { AlertTriangle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,12 +34,15 @@ export function DangerZoneCard({ onReset }: DangerZoneCardProps) {
 
   return (
     <>
-      <Card className="border-red-300/65 bg-red-100/35 dark:border-red-400/35 dark:bg-red-950/22">
-        <CardHeader>
-          <CardTitle className="text-base text-red-700 dark:text-red-300">Danger Zone</CardTitle>
+      <Card className="border border-red-200 bg-red-50 dark:border-red-800/50 dark:bg-red-950/20">
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-2 text-base text-red-700 dark:text-red-400">
+            <AlertTriangle className="h-5 w-5" />
+            Danger Zone
+          </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-red-700/90 dark:text-red-200/90">
+          <p className="text-sm text-red-600/90 dark:text-red-300/90">
             Reset all students, finances, attendance, and settings to default mock data.
           </p>
           <Button variant="destructive" onClick={() => setConfirmOpen(true)}>

@@ -14,6 +14,7 @@ export interface Student {
   joinDate: string;
   status: StudentStatus;
   monthlyFee: number;
+  teacher?: string;
 }
 
 export interface FinanceTransaction {
@@ -33,6 +34,7 @@ export interface AttendanceRecord {
   studentId: string;
   studentName: string;
   batch: StudentBatch;
+  teacher?: string;
   attendanceDate: string;
   status: AttendanceStatus;
   note?: string;
@@ -49,6 +51,7 @@ export interface UserAccess {
   userId: string;
   email: string;
   role: UserAccessRole | null;
+  assignedTeachers?: string[];
   createdAt: string;
 }
 
@@ -56,6 +59,7 @@ export interface CreateUserAccessInput {
   email: string;
   password: string;
   role: UserAccessRole;
+  assignedTeachers?: string[];
 }
 
 export interface AgentConfig {
@@ -84,6 +88,7 @@ export interface AttendanceDraft {
   studentId: string;
   studentName: string;
   batch: StudentBatch;
+  teacher?: string;
   status: AttendanceStatus;
   note?: string;
 }
@@ -95,6 +100,7 @@ export interface StudentFormInput {
   joinDate: string;
   monthlyFee?: number;
   status?: StudentStatus;
+  teacher?: string;
 }
 
 export interface TransactionFormInput {

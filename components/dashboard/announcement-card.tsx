@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowUpRight, Calendar as CalendarIcon, Link as LinkIcon, MessageSquare } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowUpRight, Calendar as CalendarIcon, MessageSquare, Edit, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -10,14 +10,22 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+
+interface Announcement {
+  id: string;
+  title: string;
+  message: string;
+  date: string;
+  created_at: string;
+}
 
 interface AnnouncementCardProps {
   className?: string;
@@ -26,24 +34,49 @@ interface AnnouncementCardProps {
 
 export function AnnouncementCard({ className, inverted = true }: AnnouncementCardProps) {
   const [open, setOpen] = useState(false);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Form state
+  const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [videoLink, setVideoLink] = useState("");
   const [date, setDate] = useState<Date | undefined>(undefined);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Fetch announcements when dialog opens
+  const fetchAnnouncements = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/announcements');
+      const result = await response.json();
+      if (result.success) {
+        setAnnouncements(result.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching announcements:', error);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (open) {
+      fetchAnnouncements();
+    }
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !message) return;
+    if (!date || !message || !title) return;
 
     try {
       const formattedDate = date.toISOString().split("T")[0];
 
-      // Call the API to create announcement
       const response = await fetch('/api/announcements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
-          message: message,
+          title,
+          message,
           date: formattedDate
         })
       });
@@ -52,19 +85,84 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
 
       if (result.success) {
         alert('Announcement created successfully!');
+        resetForm();
+        fetchAnnouncements();
       } else {
-        alert('Failed to create announcement: ' + result.error);
+        alert('Failed: ' + result.error);
       }
     } catch (error) {
-      console.error('Error creating announcement:', error);
+      console.error('Error:', error);
       alert('Failed to create announcement');
     }
+  };
 
-    // Reset form and close dialog
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this announcement?')) return;
+
+    try {
+      const response = await fetch(`/api/announcements?id=${id}`, {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        fetchAnnouncements();
+      } else {
+        alert('Failed to delete: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to delete');
+    }
+  };
+
+  const handleEdit = (announcement: Announcement) => {
+    setTitle(announcement.title);
+    setMessage(announcement.message);
+    setDate(new Date(announcement.date));
+    setEditingId(announcement.id);
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!date || !message || !title || !editingId) return;
+
+    try {
+      const formattedDate = date.toISOString().split("T")[0];
+
+      // Delete old and create new (since we don't have update endpoint)
+      await fetch(`/api/announcements?id=${editingId}`, { method: 'DELETE' });
+
+      const response = await fetch('/api/announcements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          message,
+          date: formattedDate
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert('Announcement updated successfully!');
+        resetForm();
+        fetchAnnouncements();
+      } else {
+        alert('Failed: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to update');
+    }
+  };
+
+  const resetForm = () => {
+    setTitle("");
     setMessage("");
-    setVideoLink("");
     setDate(undefined);
-    setOpen(false);
+    setEditingId(null);
   };
 
   const Icon = MessageSquare;
@@ -75,61 +173,25 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
         <button className="group block h-full w-full text-left">
           <Card
             className={cn(
-              "relative h-full min-h-[176px] overflow-hidden border border-border/80 bg-white/65 transition-all duration-300 hover:-translate-y-1.5 hover:shadow-[0_28px_52px_-30px_rgba(15,23,42,0.68)] dark:border-white/15 dark:bg-white/[0.06]",
-              inverted && "border-white/25 shadow-[0_24px_48px_-30px_rgba(39,27,86,0.8)]",
+              "relative h-full min-h-[176px] overflow-hidden border border-border/60 bg-white transition-all duration-300 hover:-translate-y-1.5 hover:shadow-lg dark:border-white/20 dark:bg-slate-900",
+              inverted && "text-white",
               className,
             )}
           >
-            <div
-              className={cn(
-                "pointer-events-none absolute -inset-[38%] blur-[68px] mix-blend-screen transition-opacity duration-500",
-                inverted
-                  ? "animate-liquid-orb opacity-62 group-hover:opacity-88"
-                  : "animate-liquid-orb opacity-28 group-hover:opacity-52",
-              )}
-              style={{
-                background: inverted
-                  ? "conic-gradient(from 180deg at 50% 50%, rgba(255,255,255,0.34), rgba(56,189,248,0.42), rgba(236,72,153,0.38), rgba(99,102,241,0.42), rgba(255,255,255,0.34))"
-                  : "conic-gradient(from 180deg at 50% 50%, rgba(96,165,250,0.22), rgba(148,163,184,0.12), rgba(59,130,246,0.2), rgba(96,165,250,0.2))",
-              }}
-            />
-            <div
-              className={cn(
-                "pointer-events-none absolute -inset-[30%] blur-[62px] mix-blend-screen transition-opacity duration-500",
-                inverted
-                  ? "animate-liquid-orb-delayed opacity-42 group-hover:opacity-78"
-                  : "animate-liquid-orb-delayed opacity-20 group-hover:opacity-42",
-              )}
-              style={{
-                background: inverted
-                  ? "radial-gradient(circle at 20% 22%, rgba(255,255,255,0.48), transparent 52%), radial-gradient(circle at 75% 70%, rgba(96,165,250,0.36), transparent 58%)"
-                  : "radial-gradient(circle at 24% 24%, rgba(191,219,254,0.38), transparent 50%), radial-gradient(circle at 72% 68%, rgba(147,197,253,0.24), transparent 56%)",
-              }}
-            />
-            <div
-              className={cn(
-                "pointer-events-none absolute inset-0 bg-[length:220%_220%] transition-opacity duration-500",
-                inverted
-                  ? "animate-liquid-sheen opacity-35 bg-[linear-gradient(120deg,transparent_24%,rgba(255,255,255,0.3)_50%,transparent_76%)] group-hover:opacity-95"
-                  : "animate-liquid-sheen opacity-12 bg-[linear-gradient(120deg,transparent_25%,rgba(255,255,255,0.24)_50%,transparent_75%)] group-hover:opacity-70",
-              )}
-            />
-            <div
-              className={cn(
-                "pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100",
-                inverted
-                  ? "bg-[radial-gradient(120%_100%_at_10%_5%,rgba(255,255,255,0.2),transparent_60%)]"
-                  : "bg-[radial-gradient(120%_120%_at_10%_10%,rgba(96,165,250,0.16),transparent_60%)] dark:bg-[radial-gradient(120%_120%_at_10%_10%,rgba(147,197,253,0.14),transparent_60%)]",
-              )}
-            />
-            <CardContent className="relative flex h-full flex-col justify-between gap-7 p-5 md:p-6">
+            {/* Gradient background for inverted cards */}
+            {inverted && (
+              <div className="absolute inset-0 bg-gradient-to-br opacity-90" style={{
+                background: 'linear-gradient(to bottom right, #dc2626, #f97316, #ea580c)'
+              }} />
+            )}
+            <CardContent className="relative flex h-full flex-col justify-between gap-4 p-5 md:p-6">
               <div className="flex items-start justify-between">
                 <div
                   className={cn(
                     "rounded-xl p-2.5 transition-transform duration-300 group-hover:scale-105",
                     inverted
-                      ? "bg-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]"
-                      : "bg-white/65 dark:bg-white/[0.08]",
+                      ? "bg-white/20"
+                      : "bg-slate-100 dark:bg-white/10",
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -137,21 +199,21 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
                 <ArrowUpRight
                   className={cn(
                     "h-4 w-4 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5",
-                    inverted ? "opacity-90" : "opacity-70",
+                    inverted ? "opacity-90" : "text-slate-400",
                   )}
                 />
               </div>
               <div>
                 <p
                   className={cn(
-                    "text-[10px] font-medium uppercase tracking-[0.16em]",
-                    inverted ? "text-white/75" : "text-muted-foreground/85",
+                    "text-[10px] font-medium uppercase tracking-wider",
+                    inverted ? "text-white/70" : "text-slate-500 dark:text-slate-400",
                   )}
                 >
                   Quick Link
                 </p>
                 <h3 className="mt-1 text-base font-semibold leading-tight md:text-[1.08rem]">Make Announcement</h3>
-                <p className={cn("mt-2 text-sm leading-relaxed", inverted ? "text-white/82" : "text-muted-foreground")}>
+                <p className={cn("mt-1.5 text-sm leading-relaxed", inverted ? "text-white/80" : "text-slate-600 dark:text-slate-300")}>
                   Create a new announcement
                 </p>
               </div>
@@ -159,79 +221,132 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
           </Card>
         </button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="isolate max-h-[80vh] overflow-y-auto border border-slate-200 bg-white text-slate-900 shadow-xl sm:max-w-[700px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
         <DialogHeader>
-          <DialogTitle>Make Announcement</DialogTitle>
-          <DialogDescription>
-            Create a new announcement for your students. Fill in the details below.
+          <DialogTitle className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Manage Announcements</DialogTitle>
+          <DialogDescription className="text-slate-600 dark:text-slate-400">
+            View, create, edit, or delete announcements for your students.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
+
+        {/* Announcement List */}
+        <div className="mt-4 max-h-[250px] space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3.5 dark:border-slate-700 dark:bg-slate-800/50">
+          <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200">Current Announcements</h4>
+          {loading ? (
+            <p className="text-sm text-slate-600 dark:text-slate-400">Loading...</p>
+          ) : announcements.length === 0 ? (
+            <p className="text-sm text-slate-600 dark:text-slate-400">No announcements yet. Create one below!</p>
+          ) : (
+            announcements.map((announcement) => (
+              <div
+                key={announcement.id}
+                className="flex items-start justify-between rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{announcement.title}</p>
+                  <p className="line-clamp-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{announcement.message}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {new Date(announcement.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </p>
+                </div>
+                <div className="ml-2 flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
+                    onClick={() => handleEdit(announcement)}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-900/30 dark:hover:text-red-300"
+                    onClick={() => handleDelete(announcement.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Add/Edit Form */}
+        <form
+          onSubmit={editingId ? handleUpdate : handleSubmit}
+          className="mt-6 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50"
+        >
+          <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200">
+            {editingId ? 'Edit Announcement' : 'Add New Announcement'}
+          </h4>
+
+          <div className="grid gap-4">
             <div className="grid gap-2">
-              <label htmlFor="message" className="text-sm font-medium">
+              <label htmlFor="title" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Title
+              </label>
+              <Input
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Enter announcement title..."
+                className="border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400"
+                required
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label htmlFor="message" className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Message
               </label>
-              <textarea
+              <Textarea
                 id="message"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Enter your announcement message..."
-                className="min-h-[120px] w-full rounded-xl border border-border/85 bg-white/55 px-3.5 py-2 text-sm ring-offset-background backdrop-blur-xl transition-[border-color,box-shadow,background-color] duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/65 focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:border-border focus-visible:bg-white/70 disabled:cursor-not-allowed disabled:opacity-55 dark:border-white/15 dark:bg-white/[0.05] dark:focus-visible:bg-white/[0.1] resize-none"
+                className="min-h-[100px] border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400"
                 required
               />
             </div>
+
             <div className="grid gap-2">
-              <label htmlFor="videoLink" className="text-sm font-medium">
-                Video Link <span className="text-muted-foreground font-normal">(optional)</span>
-              </label>
-              <div className="relative">
-                <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="videoLink"
-                  type="url"
-                  value={videoLink}
-                  onChange={(e) => setVideoLink(e.target.value)}
-                  placeholder="https://example.com/video"
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">
-                Date
-              </label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Date</label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
                     type="button"
                     variant="outline"
                     className={cn(
-                      "w-full justify-start rounded-xl border border-border/85 bg-white/55 px-3.5 py-2 text-left text-sm font-normal hover:bg-white/70 dark:border-white/15 dark:bg-white/[0.05] dark:hover:bg-white/[0.1]",
-                      !date && "text-muted-foreground",
+                      "w-full justify-start rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-left text-sm font-normal text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700",
+                      !date && "text-slate-500 dark:text-slate-400",
                     )}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {date ? date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : <span>Select date</span>}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
+                <PopoverContent className="w-auto border border-slate-200 bg-white p-0 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white" align="start">
                   <Calendar
                     mode="single"
                     selected={date}
                     onSelect={setDate}
-                    initialFocus
                   />
                 </PopoverContent>
               </Popover>
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
+
+          <div className="flex gap-2 justify-end">
+            {editingId && (
+              <Button type="button" variant="outline" onClick={resetForm}>
+                Cancel
+              </Button>
+            )}
+            <Button type="submit">
+              {editingId ? 'Update Announcement' : 'Add Announcement'}
             </Button>
-            <Button type="submit">Create Announcement</Button>
-          </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

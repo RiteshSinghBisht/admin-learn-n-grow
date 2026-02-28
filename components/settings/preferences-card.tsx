@@ -11,20 +11,20 @@ export function PreferencesCard() {
   const isDark = theme === "dark";
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Preferences</CardTitle>
+    <Card className="border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <CardHeader className="border-b border-slate-200 bg-slate-50 pb-4 dark:border-slate-700 dark:bg-slate-800/50">
+        <CardTitle className="text-lg text-slate-900 dark:text-white">Theme</CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-between rounded-xl border border-border/80 bg-white/45 p-4 backdrop-blur-xl dark:border-white/15 dark:bg-white/[0.03]">
+      <CardContent className="pt-6 pb-6 md:pt-7 md:pb-7">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
           <div>
-            <p className="font-medium">Theme</p>
-            <p className="text-sm text-muted-foreground">Toggle between light and dark mode</p>
+            <p className="font-medium text-slate-900 dark:text-white">Toggle between light and dark mode</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Current: {isDark ? 'Dark' : 'Light'} mode</p>
           </div>
           <div className="flex items-center gap-3">
-            <Sun className="h-4 w-4 text-amber-500" />
+            <Sun className="h-5 w-5 text-amber-500" />
             <Switch checked={isDark} onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")} />
-            <MoonStar className="h-4 w-4 text-indigo-500" />
+            <MoonStar className="h-5 w-5 text-indigo-500" />
           </div>
         </div>
       </CardContent>

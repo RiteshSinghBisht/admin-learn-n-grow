@@ -1,9 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { RefreshCw, ShieldCheck, Trash2, UserCog, UserPlus } from "lucide-react";
+import {
+  CircleSlash,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  UserCog,
+  UserPlus,
+  Users,
+} from "lucide-react";
 
 import { useAuth } from "@/components/providers/auth-provider";
+import { useAppData } from "@/components/providers/app-data-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,8 +46,38 @@ import { cn } from "@/lib/utils";
 
 const ROLE_OPTIONS: Array<{ value: UserAccessRole; label: string }> = [
   { value: "admin", label: "Full Access (Admin)" },
-  { value: "students_only", label: "Students Only" },
+  { value: "students_only", label: "Student Only" },
 ];
+
+function parseTeacherNames(value: string) {
+  const seen = new Set<string>();
+  const parsed: string[] = [];
+
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      parsed.push(item);
+    });
+
+  return parsed;
+}
+
+function formatTeacherNames(values: string[] | undefined) {
+  return (values ?? []).join(", ");
+}
+
+function roleLabel(value: UserAccessRole | null) {
+  if (value === "admin") return "Full Access";
+  if (value === "students_only") return "Student Only";
+  return "Unassigned";
+}
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -63,8 +102,12 @@ function formatCreatedDate(value: string) {
 
 export function AccessManagementCard() {
   const { isAuthEnabled, role, user, refreshRole } = useAuth();
+  const { students } = useAppData();
   const [records, setRecords] = React.useState<UserAccess[]>([]);
   const [selectedRoleByUser, setSelectedRoleByUser] = React.useState<Record<string, UserAccessRole>>(
+    {},
+  );
+  const [selectedTeachersByUser, setSelectedTeachersByUser] = React.useState<Record<string, string>>(
     {},
   );
   const [loading, setLoading] = React.useState(true);
@@ -75,11 +118,21 @@ export function AccessManagementCard() {
   const [createEmail, setCreateEmail] = React.useState("");
   const [createPassword, setCreatePassword] = React.useState("");
   const [createRole, setCreateRole] = React.useState<UserAccessRole>("students_only");
+  const [createAssignedTeachers, setCreateAssignedTeachers] = React.useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [deleteTargetUser, setDeleteTargetUser] = React.useState<UserAccess | null>(null);
   const [deletingMode, setDeletingMode] = React.useState<UserDeleteMode | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const teacherOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    students.forEach((student) => {
+      if (student.teacher?.trim()) {
+        set.add(student.teacher.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [students]);
 
   const loadUsers = React.useCallback(
     async (isManualRefresh = false) => {
@@ -101,8 +154,13 @@ export function AccessManagementCard() {
           acc[item.userId] = item.role ?? "students_only";
           return acc;
         }, {});
+        const nextTeachers = users.reduce<Record<string, string>>((acc, item) => {
+          acc[item.userId] = formatTeacherNames(item.assignedTeachers);
+          return acc;
+        }, {});
         setRecords(users);
         setSelectedRoleByUser(nextSelection);
+        setSelectedTeachersByUser(nextTeachers);
       } catch (loadError) {
         setError(getErrorMessage(loadError, "Failed to load access records."));
       } finally {
@@ -136,9 +194,15 @@ export function AccessManagementCard() {
     if (!selectedRole) {
       return;
     }
+    const assignedTeachers = parseTeacherNames(selectedTeachersByUser[userId] ?? "");
 
     if (user?.id === userId && selectedRole !== "admin") {
       setError("You cannot remove your own admin access.");
+      return;
+    }
+
+    if (selectedRole === "students_only" && !assignedTeachers.length) {
+      setError("Assign at least one teacher for Student Only access.");
       return;
     }
 
@@ -146,13 +210,18 @@ export function AccessManagementCard() {
     setSavingUserId(userId);
 
     try {
-      await dataService.updateUserAccessRole(userId, selectedRole);
+      await dataService.updateUserAccessRole(
+        userId,
+        selectedRole,
+        selectedRole === "students_only" ? assignedTeachers : [],
+      );
       setRecords((prev) =>
         prev.map((item) =>
           item.userId === userId
             ? {
                 ...item,
                 role: selectedRole,
+                assignedTeachers: selectedRole === "students_only" ? assignedTeachers : [],
               }
             : item,
         ),
@@ -172,6 +241,7 @@ export function AccessManagementCard() {
 
   async function handleCreateUser() {
     const email = createEmail.trim().toLowerCase();
+    const assignedTeachers = parseTeacherNames(createAssignedTeachers);
     if (!email) {
       setError("Email is required.");
       return;
@@ -179,6 +249,11 @@ export function AccessManagementCard() {
 
     if (createPassword.length < 6) {
       setError("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (createRole === "students_only" && !assignedTeachers.length) {
+      setError("Assign at least one teacher for Student Only access.");
       return;
     }
 
@@ -191,6 +266,7 @@ export function AccessManagementCard() {
         email,
         password: createPassword,
         role: createRole,
+        assignedTeachers: createRole === "students_only" ? assignedTeachers : [],
       });
 
       setRecords((prev) => {
@@ -208,10 +284,15 @@ export function AccessManagementCard() {
         ...prev,
         [created.userId]: created.role ?? "students_only",
       }));
+      setSelectedTeachersByUser((prev) => ({
+        ...prev,
+        [created.userId]: formatTeacherNames(created.assignedTeachers),
+      }));
 
       setCreateEmail("");
       setCreatePassword("");
       setCreateRole("students_only");
+      setCreateAssignedTeachers("");
       setMessage("New user added successfully.");
     } catch (createError) {
       setError(getErrorMessage(createError, "Failed to add user."));
@@ -252,16 +333,27 @@ export function AccessManagementCard() {
           delete next[deleteTargetUser.userId];
           return next;
         });
+        setSelectedTeachersByUser((prev) => {
+          const next = { ...prev };
+          delete next[deleteTargetUser.userId];
+          return next;
+        });
         setMessage("User deleted successfully.");
       } else {
         setRecords((prev) =>
           prev.map((item) =>
-            item.userId === deleteTargetUser.userId ? { ...item, role: null } : item,
+            item.userId === deleteTargetUser.userId
+              ? { ...item, role: null, assignedTeachers: [] }
+              : item,
           ),
         );
         setSelectedRoleByUser((prev) => ({
           ...prev,
           [deleteTargetUser.userId]: "students_only",
+        }));
+        setSelectedTeachersByUser((prev) => ({
+          ...prev,
+          [deleteTargetUser.userId]: "",
         }));
         setMessage("Access removed successfully.");
       }
@@ -277,11 +369,11 @@ export function AccessManagementCard() {
 
   if (!isAuthEnabled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Access Management</CardTitle>
+      <Card className="border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+        <CardHeader className="border-b border-slate-200 bg-slate-50 pb-4 dark:border-slate-700 dark:bg-slate-800/50">
+          <CardTitle className="text-lg text-slate-900 dark:text-white">Access Management</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
+        <CardContent className="py-6 text-sm text-slate-600 dark:text-slate-400">
           Enable Supabase auth to manage user access.
         </CardContent>
       </Card>
@@ -301,21 +393,22 @@ export function AccessManagementCard() {
     return (
       item.email.toLowerCase().includes(normalized) ||
       item.userId.toLowerCase().includes(normalized) ||
-      (item.role ?? "").toLowerCase().includes(normalized)
+      (item.role ?? "").toLowerCase().includes(normalized) ||
+      (item.assignedTeachers ?? []).some((teacher) => teacher.toLowerCase().includes(normalized))
     );
   });
 
   return (
-    <Card className="overflow-hidden border border-border/80 bg-white/55 dark:border-white/15 dark:bg-white/[0.04]">
-      <CardHeader className="border-b border-border/70 bg-gradient-to-br from-emerald-500/12 via-cyan-500/10 to-sky-500/12 dark:border-white/10 dark:from-emerald-400/16 dark:via-cyan-400/12 dark:to-sky-400/16">
+    <Card className="overflow-hidden border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <CardHeader className="border-b border-slate-200 bg-slate-50 pb-6 dark:border-slate-700 dark:bg-slate-800/50">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="rounded-2xl border border-white/50 bg-white/70 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] dark:border-white/20 dark:bg-white/[0.08]">
-              <ShieldCheck className="h-5 w-5 text-primary" />
+            <div className="rounded-xl border border-slate-200 bg-white p-2.5 dark:border-slate-600 dark:bg-slate-700">
+              <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <CardTitle className="text-base md:text-lg">Access Management</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <CardTitle className="text-lg text-slate-900 dark:text-white">Access Management</CardTitle>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                 Admin-only control panel for assigning and updating app access.
               </p>
             </div>
@@ -334,104 +427,192 @@ export function AccessManagementCard() {
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-5 p-6 md:p-7">
-        <div className="rounded-xl border border-border/80 bg-white/45 p-5 dark:border-white/15 dark:bg-white/[0.03] md:p-6">
-          <div className="flex items-center gap-2">
-            <UserPlus className="h-4 w-4 text-primary" />
-            <p className="text-sm font-medium">Add New User</p>
+      <CardContent className="space-y-6 p-6">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-800">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500">
+              <UserPlus className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <p className="text-base font-semibold text-slate-900 dark:text-white">Add New User</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Create a new user with access permissions</p>
+            </div>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(220px,1fr)_minmax(200px,1fr)_190px_auto]">
-            <Input
-              value={createEmail}
-              onChange={(event) => setCreateEmail(event.target.value)}
-              placeholder="user@email.com"
-              autoComplete="email"
-            />
-            <Input
-              type="password"
-              value={createPassword}
-              onChange={(event) => setCreatePassword(event.target.value)}
-              placeholder="Temporary password"
-              autoComplete="new-password"
-            />
-            <Select value={createRole} onValueChange={(value: UserAccessRole) => setCreateRole(value)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLE_OPTIONS.map((roleOption) => (
-                  <SelectItem key={roleOption.value} value={roleOption.value}>
-                    {roleOption.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              onClick={() => void handleCreateUser()}
-              disabled={creating}
-              className="h-[42px]"
-            >
-              {creating ? "Adding..." : "Add User"}
-            </Button>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Email Address</label>
+              <Input
+                value={createEmail}
+                onChange={(event) => setCreateEmail(event.target.value)}
+                placeholder="user@email.com"
+                autoComplete="email"
+                className="h-10 border-slate-300 dark:border-slate-600"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Temporary Password</label>
+              <Input
+                type="password"
+                value={createPassword}
+                onChange={(event) => setCreatePassword(event.target.value)}
+                placeholder="Min 6 characters"
+                autoComplete="new-password"
+                className="h-10 border-slate-300 dark:border-slate-600"
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <Button
+                type="button"
+                onClick={() => void handleCreateUser()}
+                disabled={creating}
+                className="h-10 rounded-lg bg-emerald-600 px-6 font-medium text-white hover:bg-emerald-700"
+              >
+                {creating ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <UserPlus className="mr-2 h-4 w-4" />
+                    Add User
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
 
-          <p className="mt-3 text-xs text-muted-foreground">
-            This creates a Supabase auth account and assigns selected access immediately.
-          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Access Role</label>
+              <Select value={createRole} onValueChange={(value: UserAccessRole) => setCreateRole(value)}>
+                <SelectTrigger className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map((roleOption) => (
+                    <SelectItem key={roleOption.value} value={roleOption.value}>
+                      {roleOption.value === "admin" ? (
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                          {roleOption.label}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-sky-500" />
+                          {roleOption.label}
+                        </div>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {createRole === "students_only" ? (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Assign Teachers</label>
+                <div className="flex flex-wrap gap-2">
+                  {teacherOptions.length > 0 ? (
+                    teacherOptions.map((teacher) => {
+                      const isSelected = createAssignedTeachers.split(",").map(t => t.trim()).filter(Boolean).includes(teacher);
+                      return (
+                        <button
+                          key={teacher}
+                          type="button"
+                          onClick={() => {
+                            const current = createAssignedTeachers.split(",").map(t => t.trim()).filter(Boolean);
+                            if (isSelected) {
+                              setCreateAssignedTeachers(current.filter(t => t !== teacher).join(", "));
+                            } else {
+                              setCreateAssignedTeachers([...current, teacher].join(", "));
+                            }
+                          }}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
+                            isSelected
+                              ? "bg-cyan-500 text-white"
+                              : "border border-dashed border-cyan-300 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:border-cyan-700/50 dark:bg-cyan-950/30 dark:text-cyan-300 dark:hover:bg-cyan-900/50"
+                          )}
+                        >
+                          {isSelected && <ShieldCheck className="h-3.5 w-3.5" />}
+                          {teacher}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="text-xs text-slate-500 italic dark:text-slate-400">
+                      No teachers available. Add teachers to students first.
+                    </p>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Select one or more teachers
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-end">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Full access to all features and settings
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-3">
           <Input
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search by email, user id, or role"
-            className="max-w-md"
+            placeholder="Search by email, user id, role, or teacher"
+            className="max-w-md border-slate-300 dark:border-slate-600"
           />
           {message ? (
             <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">{message}</p>
           ) : null}
-          {error ? <p className="text-sm font-medium text-rose-600 dark:text-rose-400">{error}</p> : null}
+          {error ? <p className="text-sm font-medium text-red-600 dark:text-red-400">{error}</p> : null}
         </div>
 
         {loading ? (
-          <div className="rounded-xl border border-border/80 bg-white/40 px-4 py-6 text-sm text-muted-foreground dark:border-white/15 dark:bg-white/[0.03]">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
             Loading access records...
           </div>
         ) : (
           <Table className="min-w-[760px]">
             <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>User ID</TableHead>
-                <TableHead>Current Access</TableHead>
-                <TableHead>Change Access</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+              <TableRow className="border-slate-200 dark:border-slate-700">
+                <TableHead className="text-slate-600 dark:text-slate-400">User</TableHead>
+                <TableHead className="text-slate-600 dark:text-slate-400">Current Access</TableHead>
+                <TableHead className="text-slate-600 dark:text-slate-400">Change Access</TableHead>
+                <TableHead className="text-slate-600 dark:text-slate-400">Teacher Scope</TableHead>
+                <TableHead className="text-right text-slate-600 dark:text-slate-400">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredRecords.length ? (
                 filteredRecords.map((item) => {
                   const selectedRole = selectedRoleByUser[item.userId] ?? "students_only";
+                  const selectedTeachersRaw = selectedTeachersByUser[item.userId] ?? "";
                   const isSaving = savingUserId === item.userId;
-                  const hasChanged = selectedRole !== (item.role ?? "students_only");
+                  const originalTeachers = parseTeacherNames(formatTeacherNames(item.assignedTeachers));
+                  const selectedTeachers = parseTeacherNames(selectedTeachersRaw);
+                  const hasRoleChanged = selectedRole !== (item.role ?? "students_only");
+                  const hasTeachersChanged =
+                    selectedRole === "students_only" &&
+                    originalTeachers.join("|") !== selectedTeachers.join("|");
+                  const hasChanged = hasRoleChanged || hasTeachersChanged;
 
                   return (
-                    <TableRow key={item.userId}>
+                    <TableRow key={item.userId} className="border-slate-200 dark:border-slate-700">
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <UserCog className="h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <p className="font-medium">{item.email}</p>
-                            <p className="text-xs text-muted-foreground">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700">
+                            <UserCog className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-slate-900 dark:text-white">{item.email}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                               Joined {formatCreatedDate(item.createdAt)}
                             </p>
                           </div>
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs text-muted-foreground">{item.userId}</span>
                       </TableCell>
                       <TableCell>
                         {item.role ? (
@@ -439,17 +620,23 @@ export function AccessManagementCard() {
                             variant="outline"
                             className={
                               item.role === "admin"
-                                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
-                                : "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                ? "inline-flex items-center gap-1.5 rounded-full border-emerald-500/45 bg-emerald-500/15 px-2.5 py-1 font-medium text-emerald-700 dark:text-emerald-300"
+                                : "inline-flex items-center gap-1.5 rounded-full border-sky-500/45 bg-sky-500/15 px-2.5 py-1 font-medium text-sky-700 dark:text-sky-300"
                             }
                           >
-                            {item.role === "admin" ? "Admin" : "Students Only"}
+                            {item.role === "admin" ? (
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                            ) : (
+                              <Users className="h-3.5 w-3.5" />
+                            )}
+                            {roleLabel(item.role)}
                           </Badge>
                         ) : (
                           <Badge
                             variant="outline"
-                            className="border-slate-500/35 bg-slate-500/15 text-slate-600 dark:text-slate-300"
+                            className="inline-flex items-center gap-1.5 rounded-full border-slate-500/35 bg-slate-500/15 px-2.5 py-1 font-medium text-slate-600 dark:text-slate-300"
                           >
+                            <CircleSlash className="h-3.5 w-3.5" />
                             Unassigned
                           </Badge>
                         )}
@@ -473,33 +660,78 @@ export function AccessManagementCard() {
                           </SelectContent>
                         </Select>
                       </TableCell>
+                      <TableCell>
+                        {selectedRole === "students_only" ? (
+                          teacherOptions.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {teacherOptions.map((teacher) => {
+                                const isSelected = selectedTeachersRaw.split(",").map(t => t.trim()).filter(Boolean).includes(teacher);
+                                return (
+                                  <button
+                                    key={teacher}
+                                    type="button"
+                                    onClick={() => {
+                                      const current = selectedTeachersRaw.split(",").map(t => t.trim()).filter(Boolean);
+                                      const newTeachers = isSelected
+                                        ? current.filter(t => t !== teacher)
+                                        : [...current, teacher];
+                                      setSelectedTeachersByUser((prev) => ({
+                                        ...prev,
+                                        [item.userId]: newTeachers.join(", "),
+                                      }));
+                                    }}
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-all",
+                                      isSelected
+                                        ? "bg-cyan-500 text-white"
+                                        : "border border-dashed border-cyan-300 bg-cyan-50 text-cyan-700 dark:bg-cyan-950/30 dark:text-cyan-300 dark:hover:bg-cyan-900/50 dark:border-cyan-700/50"
+                                    )}
+                                  >
+                                    {teacher}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-500 italic dark:text-slate-400">No teachers available</span>
+                          )
+                        ) : (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">Not required</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => void handleSave(item.userId)}
-                          disabled={!hasChanged || isSaving}
-                          className="min-w-[94px]"
-                        >
-                          {isSaving ? "Saving..." : "Save"}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => openDeleteDialog(item)}
-                          disabled={isSaving}
-                          className="ml-2 min-w-[86px]"
-                        >
-                          Delete
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openDeleteDialog(item)}
+                            disabled={isSaving}
+                            className="h-8 w-8 rounded-full p-0 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void handleSave(item.userId)}
+                            disabled={!hasChanged || isSaving}
+                            className="h-8 rounded-full px-4 text-xs font-medium"
+                          >
+                            {isSaving ? (
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              "Save"
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center text-sm text-slate-500 dark:text-slate-400">
                     No users matched your search.
                   </TableCell>
                 </TableRow>
@@ -519,7 +751,7 @@ export function AccessManagementCard() {
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete User or Remove Access</DialogTitle>
             <DialogDescription>
@@ -533,13 +765,13 @@ export function AccessManagementCard() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="rounded-xl border border-border/80 bg-white/45 p-4 text-sm text-muted-foreground dark:border-white/15 dark:bg-white/[0.03]">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
             <p>
-              <span className="font-medium text-foreground">Remove Access</span>: keeps user account,
+              <span className="font-medium text-slate-900 dark:text-white">Remove Access</span>: keeps user account,
               removes app role.
             </p>
             <p className="mt-2">
-              <span className="font-medium text-foreground">Delete User</span>: permanently removes
+              <span className="font-medium text-slate-900 dark:text-white">Delete User</span>: permanently removes
               auth user and access.
             </p>
           </div>

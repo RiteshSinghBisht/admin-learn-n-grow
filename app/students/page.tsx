@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export default function StudentsPage() {
   const {
     students,
+    attendance,
     loading,
     addStudent,
     updateStudent,
@@ -55,6 +56,7 @@ export default function StudentsPage() {
         <TabsContent value="attendance">
           <AttendanceTab
             students={students}
+            attendance={attendance}
             getAttendanceForDate={getAttendanceForDate}
             onSaveAttendance={saveAttendance}
           />

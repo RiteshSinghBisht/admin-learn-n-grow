@@ -7,20 +7,20 @@ begin;
 truncate table public.attendance, public.finances, public.students restart identity;
 
 -- Students (mix of active/inactive, morning/evening, varied fees)
-insert into public.students (name, phone, batch, join_date, status, monthly_fee)
+insert into public.students (name, phone, batch, join_date, status, monthly_fee, teacher)
 values
-  ('Aarav Sharma', '+91-9876543210', 'morning', '2025-08-08', 'active', 3000),
-  ('Meera Joshi', '+91-9876543211', 'evening', '2025-09-14', 'active', 3000),
-  ('Rohan Verma', '+91-9876543212', 'morning', '2025-10-05', 'active', 3000),
-  ('Isha Kapoor', '+91-9876543213', 'evening', '2025-11-20', 'active', 3000),
-  ('Kabir Singh', '+91-9876543214', 'morning', '2025-12-07', 'inactive', 3000),
-  ('Anaya Mishra', '+91-9876543215', 'evening', '2025-12-17', 'active', 3000),
-  ('Sanya Negi', '+91-9876543216', 'morning', '2025-10-11', 'active', 3200),
-  ('Dev Malik', '+91-9876543217', 'evening', '2025-09-25', 'active', 2800),
-  ('Priya Rawat', '+91-9876543218', 'morning', '2025-11-03', 'active', 3000),
-  ('Yash Bhatia', '+91-9876543219', 'evening', '2025-12-01', 'active', 3000),
-  ('Ritika Sood', '+91-9876543220', 'morning', '2025-10-19', 'inactive', 3000),
-  ('Harsh Pandey', '+91-9876543221', 'evening', '2025-12-09', 'active', 3500);
+  ('Aarav Sharma', '+91-9876543210', 'morning', '2025-08-08', 'active', 3000, 'Neha Verma'),
+  ('Meera Joshi', '+91-9876543211', 'evening', '2025-09-14', 'active', 3000, 'Rahul Mehta'),
+  ('Rohan Verma', '+91-9876543212', 'morning', '2025-10-05', 'active', 3000, 'Neha Verma'),
+  ('Isha Kapoor', '+91-9876543213', 'evening', '2025-11-20', 'active', 3000, 'Rahul Mehta'),
+  ('Kabir Singh', '+91-9876543214', 'morning', '2025-12-07', 'inactive', 3000, 'Neha Verma'),
+  ('Anaya Mishra', '+91-9876543215', 'evening', '2025-12-17', 'active', 3000, 'Rahul Mehta'),
+  ('Sanya Negi', '+91-9876543216', 'morning', '2025-10-11', 'active', 3200, 'Neha Verma'),
+  ('Dev Malik', '+91-9876543217', 'evening', '2025-09-25', 'active', 2800, 'Rahul Mehta'),
+  ('Priya Rawat', '+91-9876543218', 'morning', '2025-11-03', 'active', 3000, 'Neha Verma'),
+  ('Yash Bhatia', '+91-9876543219', 'evening', '2025-12-01', 'active', 3000, 'Rahul Mehta'),
+  ('Ritika Sood', '+91-9876543220', 'morning', '2025-10-19', 'inactive', 3000, 'Neha Verma'),
+  ('Harsh Pandey', '+91-9876543221', 'evening', '2025-12-09', 'active', 3500, 'Rahul Mehta');
 
 -- Student fee transactions: January 2026 (all active = paid)
 insert into public.finances (
@@ -85,15 +85,16 @@ with weekdays as (
   where extract(isodow from d) < 6
 ),
 active_students as (
-  select id, name, batch
+  select id, name, batch, teacher
   from public.students
   where status = 'active'
 )
-insert into public.attendance (student_id, student_name, batch, attendance_date, status)
+insert into public.attendance (student_id, student_name, batch, teacher, attendance_date, status)
 select
   s.id,
   s.name,
   s.batch,
+  s.teacher,
   w.day,
   case
     when ((extract(day from w.day)::int + ascii(substring(s.name, 1, 1))) % 8) = 0 then 'absent'

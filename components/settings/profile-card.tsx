@@ -20,7 +20,7 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
   const [saved, setSaved] = React.useState(false);
 
   const inputClassName =
-    "h-11 rounded-xl border-border/80 bg-white/70 pl-10 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] focus-visible:ring-2 focus-visible:ring-primary/40 dark:border-white/20 dark:bg-white/[0.06]";
+    "h-11 rounded-lg border border-slate-300 bg-white px-4 pl-10 text-sm dark:border-slate-600 dark:bg-slate-800";
 
   React.useEffect(() => {
     setFormState(profile);
@@ -40,26 +40,26 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
   }
 
   return (
-    <Card className="overflow-hidden border border-border/80 bg-white/55 dark:border-white/15 dark:bg-white/[0.04]">
-      <CardHeader className="border-b border-border/70 bg-gradient-to-br from-sky-500/12 via-indigo-500/10 to-fuchsia-500/12 dark:border-white/10 dark:from-sky-400/16 dark:via-indigo-400/12 dark:to-fuchsia-400/16">
+    <Card className="overflow-hidden border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <CardHeader className="border-b border-slate-200 bg-slate-50 pb-6 dark:border-slate-700 dark:bg-slate-800/50">
         <div className="flex items-start gap-4">
-          <div className="rounded-2xl border border-white/50 bg-white/70 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] dark:border-white/20 dark:bg-white/[0.08]">
-            <Building2 className="h-5 w-5 text-primary" />
+          <div className="rounded-xl border border-slate-200 bg-white p-2.5 dark:border-slate-600 dark:bg-slate-700">
+            <Building2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           </div>
           <div>
-            <CardTitle className="text-base md:text-lg">Business Profile</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <CardTitle className="text-lg text-slate-900 dark:text-white">Business Profile</CardTitle>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
               Update business identity details used across this admin panel.
             </p>
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        <form className="space-y-5 pt-1" onSubmit={handleSubmit}>
+        <form className="space-y-5 pt-4" onSubmit={handleSubmit}>
           <div className="space-y-2">
-            <Label htmlFor="businessName">Business Name</Label>
+            <Label htmlFor="businessName" className="text-slate-700 dark:text-slate-300">Business Name</Label>
             <div className="relative">
-              <Building2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80" />
+              <Building2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 id="businessName"
                 className={inputClassName}
@@ -74,9 +74,9 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="ownerName">Owner Name</Label>
+              <Label htmlFor="ownerName" className="text-slate-700 dark:text-slate-300">Owner Name</Label>
               <div className="relative">
-                <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80" />
+                <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
                   id="ownerName"
                   className={inputClassName}
@@ -90,9 +90,9 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="profilePhone">Phone</Label>
+              <Label htmlFor="profilePhone" className="text-slate-700 dark:text-slate-300">Phone</Label>
               <div className="relative">
-                <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80" />
+                <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
                   id="profilePhone"
                   className={inputClassName}
@@ -107,9 +107,9 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="address">Address</Label>
+            <Label htmlFor="address" className="text-slate-700 dark:text-slate-300">Address</Label>
             <div className="relative">
-              <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80" />
+              <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 id="address"
                 className={inputClassName}
@@ -122,18 +122,18 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between pt-2">
             {saved ? (
               <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
                 Profile saved successfully.
               </p>
             ) : (
-              <p className="text-sm text-muted-foreground">Keep details up to date for accurate records.</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Keep details up to date for accurate records.</p>
             )}
             <Button
               type="submit"
               disabled={saving}
-              className="min-w-[132px] rounded-xl shadow-[0_12px_22px_-14px_rgba(37,99,235,0.75)]"
+              className="min-w-[132px] rounded-lg"
             >
               {saving ? "Saving..." : "Save"}
             </Button>

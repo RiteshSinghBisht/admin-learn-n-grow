@@ -86,6 +86,8 @@ export function QuickAddTransactionDialog({
 
   const isEdit = Boolean(initialData);
   const isStudentFee = category === "Student Fee";
+  const isOtherIncome = category === "Other Income";
+  const isIncome = isStudentFee || isOtherIncome;
 
   React.useEffect(() => {
     if (!open) return;
@@ -136,7 +138,7 @@ export function QuickAddTransactionDialog({
       const payload: TransactionFormInput = {
         transactionDate,
         category,
-        type: isStudentFee ? "income" : "expense",
+        type: isIncome ? "income" : "expense",
         amount: numericAmount,
         status: isStudentFee ? status : "paid",
         description: note.trim() || `${category} transaction`,

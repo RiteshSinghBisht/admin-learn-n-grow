@@ -30,7 +30,45 @@ function formatAuthTransportError(action: string, error: unknown) {
 }
 
 interface AppUserRoleRow {
-  role: AppRole;
+  role: AppRole | "teacher" | null;
+  assigned_teachers?: string[] | null;
+}
+
+function normalizeTeacherNames(values: string[] | null | undefined) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  (values ?? []).forEach((value) => {
+    const next = value.trim();
+    if (!next) {
+      return;
+    }
+    const key = next.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    normalized.push(next);
+  });
+
+  return normalized;
+}
+
+function isMissingAssignedTeachersColumnError(message: string) {
+  return (
+    message.includes("Could not find the 'assigned_teachers' column of 'app_user_roles'") ||
+    message.includes("column app_user_roles.assigned_teachers does not exist")
+  );
+}
+
+function normalizeStoredRole(role: AppUserRoleRow["role"]): AppRole | null {
+  if (role === "admin") {
+    return "admin";
+  }
+  if (role === "students_only" || role === "teacher") {
+    return "students_only";
+  }
+  return null;
 }
 
 interface AuthContextValue {
@@ -40,6 +78,7 @@ interface AuthContextValue {
   user: User | null;
   session: Session | null;
   role: AppRole | null;
+  assignedTeachers: string[];
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshRole: () => Promise<void>;
@@ -55,12 +94,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = React.useState<Session | null>(null);
   const [user, setUser] = React.useState<User | null>(null);
   const [role, setRole] = React.useState<AppRole | null>(isAuthEnabled ? null : "admin");
+  const [assignedTeachers, setAssignedTeachers] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(isAuthEnabled);
   const [roleLoading, setRoleLoading] = React.useState(isAuthEnabled);
 
   const loadRole = React.useCallback(async (userId: string) => {
     if (!isAuthEnabled || !supabase) {
       setRole("admin");
+      setAssignedTeachers([]);
       setRoleLoading(false);
       return;
     }
@@ -72,24 +113,37 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await supabase
         .from("app_user_roles")
-        .select("role")
+        .select("role, assigned_teachers")
         .eq("user_id", userId)
         .maybeSingle();
       data = response.data as AppUserRoleRow | null;
       error = response.error as { message: string } | null;
+
+      if (error && isMissingAssignedTeachersColumnError(error.message)) {
+        const fallback = await supabase
+          .from("app_user_roles")
+          .select("role")
+          .eq("user_id", userId)
+          .maybeSingle();
+        data = fallback.data as AppUserRoleRow | null;
+        error = fallback.error as { message: string } | null;
+      }
     } catch (transportError) {
       setRole(null);
+      setAssignedTeachers([]);
       setRoleLoading(false);
       throw new Error(formatAuthTransportError("load user role", transportError));
     }
 
     if (error) {
       setRole(null);
+      setAssignedTeachers([]);
       setRoleLoading(false);
       throw new Error(`Failed to load user role: ${error.message}`);
     }
 
-    setRole(data?.role ?? null);
+    setRole(normalizeStoredRole(data?.role ?? null));
+    setAssignedTeachers(normalizeTeacherNames(data?.assigned_teachers));
     setRoleLoading(false);
   }, []);
 
@@ -98,6 +152,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setLoading(false);
       setRoleLoading(false);
       setRole("admin");
+      setAssignedTeachers([]);
       return;
     }
 
@@ -118,6 +173,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setSession(null);
         setUser(null);
         setRole(null);
+        setAssignedTeachers([]);
         setLoading(false);
         setRoleLoading(false);
         console.error(formatAuthTransportError("load session", transportError));
@@ -141,6 +197,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (!nextUser) {
         setRole(null);
+        setAssignedTeachers([]);
         setRoleLoading(false);
         return;
       }
@@ -165,6 +222,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (!nextUser) {
         setRole(null);
+        setAssignedTeachers([]);
         setRoleLoading(false);
         return;
       }
@@ -206,6 +264,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setSession(null);
       setUser(null);
       setRole("admin");
+      setAssignedTeachers([]);
       setLoading(false);
       setRoleLoading(false);
       return;
@@ -226,6 +285,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const refreshRole = React.useCallback(async () => {
     if (!user) {
       setRole(null);
+      setAssignedTeachers([]);
       setRoleLoading(false);
       return;
     }
@@ -241,11 +301,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       user,
       session,
       role,
+      assignedTeachers,
       signIn,
       signOut,
       refreshRole,
     }),
-    [loading, refreshRole, role, roleLoading, session, signIn, signOut, user],
+    [assignedTeachers, loading, refreshRole, role, roleLoading, session, signIn, signOut, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

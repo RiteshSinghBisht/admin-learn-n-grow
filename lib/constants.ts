@@ -7,6 +7,8 @@ export const FINANCE_CATEGORIES = [
   "Utilities",
   "Marketing",
   "Supplies",
+  "Other Income",
+  "Other Expenses",
 ] as const;
 
 export const MONTHS_TO_SHOW = 6;

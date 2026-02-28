@@ -47,6 +47,7 @@ interface StudentRow {
   join_date: string;
   status: Student["status"];
   monthly_fee: number | string | null;
+  teacher: string | null;
 }
 
 interface FinanceRow {
@@ -66,6 +67,7 @@ interface AttendanceRow {
   student_id: string | number;
   student_name?: string | null;
   batch?: Student["batch"] | null;
+  teacher?: string | null;
   attendance_date: string;
   status: AttendanceRecord["status"];
   note?: string | null;
@@ -75,12 +77,14 @@ interface StudentMetaRow {
   id: string | number;
   name: string;
   batch: Student["batch"] | null;
+  teacher?: string | null;
 }
 
 interface UserAccessRow {
   user_id: string;
   email: string | null;
-  role: UserAccessRole | null;
+  role: UserAccessRole | "teacher" | null;
+  assigned_teachers?: string[] | null;
   created_at: string | null;
 }
 
@@ -89,6 +93,7 @@ interface CreateUserApiPayload {
   userId?: string;
   email?: string;
   role?: UserAccessRole;
+  assignedTeachers?: string[];
   createdAt?: string;
 }
 
@@ -116,6 +121,7 @@ function mapStudentRow(row: StudentRow): Student {
     joinDate: row.join_date,
     status: row.status,
     monthlyFee: toNumber(row.monthly_fee, 3000),
+    teacher: row.teacher?.trim() || undefined,
   };
 }
 
@@ -141,6 +147,7 @@ function mapAttendanceRow(row: AttendanceRow): AttendanceRecord {
     studentId: String(row.student_id),
     studentName: row.student_name?.trim() || "Unknown Student",
     batch: row.batch ?? "morning",
+    teacher: row.teacher?.trim() || undefined,
     attendanceDate: row.attendance_date,
     status: row.status,
     note: row.note ?? undefined,
@@ -156,7 +163,8 @@ function isMissingAttendanceSchemaError(message: string) {
     isMissingAttendanceTableError(message) ||
     isMissingAttendanceColumnError(message, "note") ||
     isMissingAttendanceColumnError(message, "student_name") ||
-    isMissingAttendanceColumnError(message, "batch")
+    isMissingAttendanceColumnError(message, "batch") ||
+    isMissingAttendanceColumnError(message, "teacher")
   );
 }
 
@@ -169,7 +177,7 @@ function isMissingAttendanceTableError(message: string) {
 
 function isMissingAttendanceColumnError(
   message: string,
-  column: "note" | "student_name" | "batch",
+  column: "note" | "student_name" | "batch" | "teacher",
 ) {
   return (
     message.includes(`Could not find the '${column}' column of 'attendance'`) ||
@@ -177,9 +185,16 @@ function isMissingAttendanceColumnError(
   );
 }
 
+function isMissingStudentsColumnError(message: string, column: "teacher") {
+  return (
+    message.includes(`Could not find the '${column}' column of 'students'`) ||
+    message.includes(`column students.${column} does not exist`)
+  );
+}
+
 function hydrateAttendanceRows(
   rows: AttendanceRow[],
-  studentMetaMap: Map<string, { name: string; batch: Student["batch"] }>,
+  studentMetaMap: Map<string, { name: string; batch: Student["batch"]; teacher?: string }>,
 ) {
   return rows.map((row) => {
     const fallback = studentMetaMap.get(String(row.student_id));
@@ -187,6 +202,7 @@ function hydrateAttendanceRows(
       ...row,
       student_name: row.student_name ?? fallback?.name ?? "Unknown Student",
       batch: row.batch ?? fallback?.batch ?? "morning",
+      teacher: row.teacher ?? fallback?.teacher ?? null,
     };
   });
 }
@@ -212,6 +228,36 @@ function formatTransportFailure(action: string, error: unknown) {
   return `Failed to ${action}: ${message}`;
 }
 
+function normalizeTeacherNames(values: string[] | null | undefined) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  (values ?? []).forEach((value) => {
+    const next = value.trim();
+    if (!next) {
+      return;
+    }
+    const key = next.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    normalized.push(next);
+  });
+
+  return normalized;
+}
+
+function normalizeUserAccessRole(role: UserAccessRow["role"]): UserAccessRole | null {
+  if (role === "admin") {
+    return "admin";
+  }
+  if (role === "students_only" || role === "teacher") {
+    return "students_only";
+  }
+  return null;
+}
+
 export interface AppDataService {
   getInitialSnapshot(): Promise<AppDataSnapshot>;
   addStudent(input: StudentFormInput): Promise<Student>;
@@ -225,7 +271,7 @@ export interface AppDataService {
   updateProfile(input: BusinessProfile): Promise<BusinessProfile>;
   resetAllData(): Promise<AppDataSnapshot>;
   listUserAccess(): Promise<UserAccess[]>;
-  updateUserAccessRole(userId: string, role: UserAccessRole): Promise<void>;
+  updateUserAccessRole(userId: string, role: UserAccessRole, assignedTeachers?: string[]): Promise<void>;
   createUserAccess(input: CreateUserAccessInput): Promise<UserAccess>;
   deleteUserAccess(userId: string, mode: UserDeleteMode): Promise<void>;
 }
@@ -237,6 +283,7 @@ class MockAppDataService implements AppDataService {
       userId: "mock-owner",
       email: "owner@learnngrow.app",
       role: "admin",
+      assignedTeachers: [],
       createdAt: new Date().toISOString(),
     },
   ];
@@ -254,6 +301,7 @@ class MockAppDataService implements AppDataService {
       joinDate: input.joinDate,
       status: input.status ?? "active",
       monthlyFee: input.monthlyFee ?? 3000,
+      teacher: input.teacher?.trim() || undefined,
     };
 
     this.snapshot.students = [student, ...this.snapshot.students];
@@ -274,6 +322,7 @@ class MockAppDataService implements AppDataService {
       joinDate: input.joinDate,
       status: input.status ?? current.status,
       monthlyFee: input.monthlyFee ?? current.monthlyFee,
+      teacher: "teacher" in input ? input.teacher?.trim() || undefined : current.teacher,
     };
 
     this.snapshot.students = this.snapshot.students.map((student) =>
@@ -371,6 +420,7 @@ class MockAppDataService implements AppDataService {
         studentId: entry.studentId,
         studentName: entry.studentName,
         batch: entry.batch,
+        teacher: entry.teacher,
         attendanceDate: date,
         status: entry.status,
         note: entry.note?.trim() || undefined,
@@ -397,13 +447,15 @@ class MockAppDataService implements AppDataService {
     return deepClone(this.mockUserAccess);
   }
 
-  async updateUserAccessRole(userId: string, role: UserAccessRole) {
+  async updateUserAccessRole(userId: string, role: UserAccessRole, assignedTeachers: string[] = []) {
+    const normalizedTeachers = role === "students_only" ? normalizeTeacherNames(assignedTeachers) : [];
     const index = this.mockUserAccess.findIndex((item) => item.userId === userId);
     if (index === -1) {
       this.mockUserAccess.push({
         userId,
         email: "new.user@example.com",
         role,
+        assignedTeachers: normalizedTeachers,
         createdAt: new Date().toISOString(),
       });
       return;
@@ -412,6 +464,7 @@ class MockAppDataService implements AppDataService {
     this.mockUserAccess[index] = {
       ...this.mockUserAccess[index],
       role,
+      assignedTeachers: normalizedTeachers,
     };
   }
 
@@ -434,6 +487,8 @@ class MockAppDataService implements AppDataService {
       userId: createId("usr"),
       email,
       role: input.role,
+      assignedTeachers:
+        input.role === "students_only" ? normalizeTeacherNames(input.assignedTeachers) : [],
       createdAt: new Date().toISOString(),
     };
 
@@ -448,7 +503,7 @@ class MockAppDataService implements AppDataService {
     }
 
     this.mockUserAccess = this.mockUserAccess.map((item) =>
-      item.userId === userId ? { ...item, role: null } : item,
+      item.userId === userId ? { ...item, role: null, assignedTeachers: [] } : item,
     );
   }
 }
@@ -495,9 +550,15 @@ class SupabaseAppDataService implements AppDataService {
     let data: StudentMetaRow[] | null = null;
     let error: { message: string } | null = null;
     try {
-      const response = await client.from("students").select("id, name, batch");
+      const response = await client.from("students").select("id, name, batch, teacher");
       data = response.data as StudentMetaRow[] | null;
       error = response.error as { message: string } | null;
+
+      if (error && isMissingStudentsColumnError(error.message, "teacher")) {
+        const fallback = await client.from("students").select("id, name, batch");
+        data = fallback.data as StudentMetaRow[] | null;
+        error = fallback.error as { message: string } | null;
+      }
     } catch (transportError) {
       throw new Error(formatTransportFailure("load students for attendance", transportError));
     }
@@ -506,11 +567,12 @@ class SupabaseAppDataService implements AppDataService {
       throw new Error(`Failed to load students for attendance: ${error.message}`);
     }
 
-    const map = new Map<string, { name: string; batch: Student["batch"] }>();
+    const map = new Map<string, { name: string; batch: Student["batch"]; teacher?: string }>();
     ((data ?? []) as StudentMetaRow[]).forEach((row) => {
       map.set(String(row.id), {
         name: row.name,
         batch: row.batch ?? "morning",
+        teacher: row.teacher?.trim() || undefined,
       });
     });
 
@@ -524,11 +586,24 @@ class SupabaseAppDataService implements AppDataService {
     try {
       const response = await client
         .from("students")
-        .select("id, name, phone, batch, join_date, status, monthly_fee")
+        .select("id, name, phone, batch, join_date, status, monthly_fee, teacher")
         .order("join_date", { ascending: false })
         .order("created_at", { ascending: false });
       data = response.data as StudentRow[] | null;
       error = response.error as { message: string } | null;
+
+      if (error && isMissingStudentsColumnError(error.message, "teacher")) {
+        const fallback = await client
+          .from("students")
+          .select("id, name, phone, batch, join_date, status, monthly_fee")
+          .order("join_date", { ascending: false })
+          .order("created_at", { ascending: false });
+        data = (fallback.data as StudentRow[] | null)?.map((row) => ({
+          ...row,
+          teacher: null,
+        })) ?? null;
+        error = fallback.error as { message: string } | null;
+      }
     } catch (transportError) {
       throw new Error(formatTransportFailure("load students", transportError));
     }
@@ -570,7 +645,7 @@ class SupabaseAppDataService implements AppDataService {
     try {
       const response = await client
         .from("attendance")
-        .select("id, student_id, student_name, batch, attendance_date, status, note")
+        .select("id, student_id, student_name, batch, teacher, attendance_date, status, note")
         .order("attendance_date", { ascending: false })
         .order("created_at", { ascending: false });
       data = response.data as AttendanceRow[] | null;
@@ -588,30 +663,36 @@ class SupabaseAppDataService implements AppDataService {
           return [];
         }
 
-        const fallbackWithNote = await client
+        const fallbackWithOptionalColumns = await client
           .from("attendance")
-          .select("id, student_id, attendance_date, status, note")
+          .select("id, student_id, attendance_date, status, note, teacher")
           .order("attendance_date", { ascending: false })
           .order("created_at", { ascending: false });
 
         let fallbackRows: AttendanceRow[] = [];
 
-        if (fallbackWithNote.error && isMissingAttendanceColumnError(fallbackWithNote.error.message, "note")) {
-          const fallbackWithoutNote = await client
+        if (
+          fallbackWithOptionalColumns.error &&
+          (isMissingAttendanceColumnError(fallbackWithOptionalColumns.error.message, "note") ||
+            isMissingAttendanceColumnError(fallbackWithOptionalColumns.error.message, "teacher"))
+        ) {
+          const fallbackWithoutOptionalColumns = await client
             .from("attendance")
             .select("id, student_id, attendance_date, status")
             .order("attendance_date", { ascending: false })
             .order("created_at", { ascending: false });
 
-          if (fallbackWithoutNote.error) {
-            throw new Error(`Failed to load attendance: ${fallbackWithoutNote.error.message}`);
+          if (fallbackWithoutOptionalColumns.error) {
+            throw new Error(
+              `Failed to load attendance: ${fallbackWithoutOptionalColumns.error.message}`,
+            );
           }
 
-          fallbackRows = (fallbackWithoutNote.data ?? []) as AttendanceRow[];
-        } else if (fallbackWithNote.error) {
-          throw new Error(`Failed to load attendance: ${fallbackWithNote.error.message}`);
+          fallbackRows = (fallbackWithoutOptionalColumns.data ?? []) as AttendanceRow[];
+        } else if (fallbackWithOptionalColumns.error) {
+          throw new Error(`Failed to load attendance: ${fallbackWithOptionalColumns.error.message}`);
         } else {
-          fallbackRows = (fallbackWithNote.data ?? []) as AttendanceRow[];
+          fallbackRows = (fallbackWithOptionalColumns.data ?? []) as AttendanceRow[];
         }
 
         const studentMetaMap = await this.fetchStudentMetaMap();
@@ -647,12 +728,13 @@ class SupabaseAppDataService implements AppDataService {
       join_date: input.joinDate,
       status: input.status ?? "active",
       monthly_fee: input.monthlyFee ?? 3000,
+      teacher: input.teacher?.trim() || null,
     };
 
     const { data, error } = await client
       .from("students")
       .insert(payload)
-      .select("id, name, phone, batch, join_date, status, monthly_fee")
+      .select("id, name, phone, batch, join_date, status, monthly_fee, teacher")
       .single();
 
     if (error) {
@@ -671,6 +753,7 @@ class SupabaseAppDataService implements AppDataService {
       batch?: Student["batch"];
       status?: Student["status"];
       monthly_fee?: number;
+      teacher?: string | null;
     } = {
       name: input.name.trim(),
       phone: input.phone.trim(),
@@ -686,12 +769,15 @@ class SupabaseAppDataService implements AppDataService {
     if (typeof input.monthlyFee === "number") {
       payload.monthly_fee = input.monthlyFee;
     }
+    if ("teacher" in input) {
+      payload.teacher = input.teacher?.trim() || null;
+    }
 
     const { data, error } = await client
       .from("students")
       .update(payload)
       .eq("id", id)
-      .select("id, name, phone, batch, join_date, status, monthly_fee")
+      .select("id, name, phone, batch, join_date, status, monthly_fee, teacher")
       .maybeSingle();
 
     if (error) {
@@ -866,6 +952,7 @@ class SupabaseAppDataService implements AppDataService {
       student_id: entry.studentId,
       student_name: entry.studentName.trim(),
       batch: entry.batch,
+      teacher: entry.teacher?.trim() || null,
       attendance_date: date,
       status: entry.status,
       note: entry.note?.trim() || null,
@@ -874,7 +961,7 @@ class SupabaseAppDataService implements AppDataService {
     let payloadForUpsert: Array<Record<string, string | null>> = payload;
     let upsertError: { message: string } | null = null;
 
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
       const response = await client.from("attendance").upsert(payloadForUpsert, {
         onConflict: "student_id,attendance_date",
       });
@@ -894,6 +981,11 @@ class SupabaseAppDataService implements AppDataService {
         continue;
       }
 
+      if (isMissingAttendanceColumnError(upsertError.message, "teacher")) {
+        payloadForUpsert = payloadForUpsert.map(({ teacher: _teacher, ...rest }) => rest);
+        continue;
+      }
+
       if (isMissingAttendanceColumnError(upsertError.message, "note")) {
         payloadForUpsert = payloadForUpsert.map(({ note: _note, ...rest }) => rest);
         continue;
@@ -908,35 +1000,41 @@ class SupabaseAppDataService implements AppDataService {
 
     const { data, error } = await client
       .from("attendance")
-      .select("id, student_id, student_name, batch, attendance_date, status, note")
+      .select("id, student_id, student_name, batch, teacher, attendance_date, status, note")
       .eq("attendance_date", date)
       .order("created_at", { ascending: false });
 
     if (error && isMissingAttendanceSchemaError(error.message)) {
-      const fallbackWithNote = await client
+      const fallbackWithOptionalColumns = await client
         .from("attendance")
-        .select("id, student_id, attendance_date, status, note")
+        .select("id, student_id, attendance_date, status, note, teacher")
         .eq("attendance_date", date)
         .order("created_at", { ascending: false });
 
       let fallbackRows: AttendanceRow[] = [];
 
-      if (fallbackWithNote.error && isMissingAttendanceColumnError(fallbackWithNote.error.message, "note")) {
-        const fallbackWithoutNote = await client
+      if (
+        fallbackWithOptionalColumns.error &&
+        (isMissingAttendanceColumnError(fallbackWithOptionalColumns.error.message, "note") ||
+          isMissingAttendanceColumnError(fallbackWithOptionalColumns.error.message, "teacher"))
+      ) {
+        const fallbackWithoutOptionalColumns = await client
           .from("attendance")
           .select("id, student_id, attendance_date, status")
           .eq("attendance_date", date)
           .order("created_at", { ascending: false });
 
-        if (fallbackWithoutNote.error) {
-          throw new Error(`Failed to load saved attendance: ${fallbackWithoutNote.error.message}`);
+        if (fallbackWithoutOptionalColumns.error) {
+          throw new Error(
+            `Failed to load saved attendance: ${fallbackWithoutOptionalColumns.error.message}`,
+          );
         }
 
-        fallbackRows = (fallbackWithoutNote.data ?? []) as AttendanceRow[];
-      } else if (fallbackWithNote.error) {
-        throw new Error(`Failed to load saved attendance: ${fallbackWithNote.error.message}`);
+        fallbackRows = (fallbackWithoutOptionalColumns.data ?? []) as AttendanceRow[];
+      } else if (fallbackWithOptionalColumns.error) {
+        throw new Error(`Failed to load saved attendance: ${fallbackWithOptionalColumns.error.message}`);
       } else {
-        fallbackRows = (fallbackWithNote.data ?? []) as AttendanceRow[];
+        fallbackRows = (fallbackWithOptionalColumns.data ?? []) as AttendanceRow[];
       }
 
       const studentMetaMap = await this.fetchStudentMetaMap();
@@ -992,12 +1090,13 @@ class SupabaseAppDataService implements AppDataService {
       join_date: student.joinDate,
       status: student.status,
       monthly_fee: student.monthlyFee,
+      teacher: student.teacher ?? null,
     }));
 
     const { data: insertedStudents, error: insertStudentsError } = await client
       .from("students")
       .insert(studentPayload)
-      .select("id, name, phone, batch, join_date, status, monthly_fee");
+      .select("id, name, phone, batch, join_date, status, monthly_fee, teacher");
 
     if (insertStudentsError) {
       throw new Error(`Failed to reset students: ${insertStudentsError.message}`);
@@ -1042,10 +1141,13 @@ class SupabaseAppDataService implements AppDataService {
           return null;
         }
 
+        const sourceStudent = mockStudents.find((student) => student.id === record.studentId);
+
         return {
           student_id: mappedStudentId,
           student_name: record.studentName,
           batch: record.batch,
+          teacher: record.teacher ?? sourceStudent?.teacher ?? null,
           attendance_date: record.attendanceDate,
           status: record.status,
           note: record.note ?? null,
@@ -1066,6 +1168,9 @@ class SupabaseAppDataService implements AppDataService {
         }
         if (isMissingAttendanceColumnError(insertAttendanceError.message, "batch")) {
           fallbackPayload = fallbackPayload.map(({ batch: _batch, ...rest }) => rest);
+        }
+        if (isMissingAttendanceColumnError(insertAttendanceError.message, "teacher")) {
+          fallbackPayload = fallbackPayload.map(({ teacher: _teacher, ...rest }) => rest);
         }
         if (isMissingAttendanceColumnError(insertAttendanceError.message, "note")) {
           fallbackPayload = fallbackPayload.map(({ note: _note, ...rest }) => rest);
@@ -1105,21 +1210,36 @@ class SupabaseAppDataService implements AppDataService {
     return ((data ?? []) as UserAccessRow[]).map((row) => ({
       userId: row.user_id,
       email: row.email?.trim() || "No email",
-      role: row.role,
+      role: normalizeUserAccessRole(row.role),
+      assignedTeachers: normalizeTeacherNames(row.assigned_teachers),
       createdAt: row.created_at ?? new Date().toISOString(),
     }));
   }
 
-  async updateUserAccessRole(userId: string, role: UserAccessRole) {
+  async updateUserAccessRole(userId: string, role: UserAccessRole, assignedTeachers: string[] = []) {
     const client = this.getClient();
+    const normalizedTeachers = role === "students_only" ? normalizeTeacherNames(assignedTeachers) : [];
     let error: { message: string } | null = null;
 
     try {
       const response = await client.rpc("upsert_user_role", {
         p_user_id: userId,
         p_role: role,
+        p_assigned_teachers: normalizedTeachers,
       });
       error = response.error as { message: string } | null;
+
+      if (
+        error &&
+        (error.message.includes("function upsert_user_role(uuid, text, text[]) does not exist") ||
+          error.message.includes("Could not find the function public.upsert_user_role"))
+      ) {
+        const fallbackResponse = await client.rpc("upsert_user_role", {
+          p_user_id: userId,
+          p_role: role,
+        });
+        error = fallbackResponse.error as { message: string } | null;
+      }
     } catch (transportError) {
       throw new Error(formatTransportFailure("update user access role", transportError));
     }
@@ -1155,6 +1275,8 @@ class SupabaseAppDataService implements AppDataService {
           email,
           password,
           role: input.role,
+          assignedTeachers:
+            input.role === "students_only" ? normalizeTeacherNames(input.assignedTeachers) : [],
         }),
       });
     } catch (transportError) {
@@ -1185,6 +1307,7 @@ class SupabaseAppDataService implements AppDataService {
       userId: payload.userId,
       email: payload.email,
       role: payload.role,
+      assignedTeachers: normalizeTeacherNames(payload.assignedTeachers),
       createdAt: payload.createdAt,
     };
   }

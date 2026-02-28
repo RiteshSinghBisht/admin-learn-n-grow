@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, UserRound } from "lucide-react";
 
 import { StudentFormDialog } from "@/components/students/student-form-dialog";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -49,6 +56,7 @@ export function StudentDirectoryTab({
   onDelete,
 }: StudentDirectoryTabProps) {
   const [search, setSearch] = React.useState("");
+  const [selectedTeacher, setSelectedTeacher] = React.useState<string>("all");
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editingStudent, setEditingStudent] = React.useState<Student | null>(null);
   const [deletingStudent, setDeletingStudent] = React.useState<Student | null>(null);
@@ -57,17 +65,39 @@ export function StudentDirectoryTab({
   const [statusUpdatingId, setStatusUpdatingId] = React.useState<string | null>(null);
   const [batchUpdatingId, setBatchUpdatingId] = React.useState<string | null>(null);
 
-  const filteredStudents = React.useMemo(() => {
-    if (!search.trim()) return students;
+  // Get unique teachers from students
+  const teachers = React.useMemo(() => {
+    const teacherSet = new Set<string>();
+    students.forEach((student) => {
+      if (student.teacher) {
+        teacherSet.add(student.teacher);
+      }
+    });
+    return Array.from(teacherSet).sort();
+  }, [students]);
 
-    const query = search.trim().toLowerCase();
-    return students.filter(
-      (student) =>
-        student.name.toLowerCase().includes(query) ||
-        student.phone.toLowerCase().includes(query) ||
-        student.batch.toLowerCase().includes(query),
-    );
-  }, [students, search]);
+  const filteredStudents = React.useMemo(() => {
+    let result = students;
+
+    // Filter by teacher if selected
+    if (selectedTeacher !== "all") {
+      result = result.filter((student) => student.teacher === selectedTeacher);
+    }
+
+    // Filter by search query
+    if (search.trim()) {
+      const query = search.trim().toLowerCase();
+      result = result.filter(
+        (student) =>
+          student.name.toLowerCase().includes(query) ||
+          student.phone.toLowerCase().includes(query) ||
+          student.batch.toLowerCase().includes(query) ||
+          (student.teacher && student.teacher.toLowerCase().includes(query)),
+      );
+    }
+
+    return result;
+  }, [students, search, selectedTeacher]);
 
   async function handleSubmit(input: StudentFormInput) {
     if (editingStudent) {
@@ -164,6 +194,22 @@ export function StudentDirectoryTab({
             onChange={(event) => setSearch(event.target.value)}
             className="sm:w-[260px]"
           />
+          <Select value={selectedTeacher} onValueChange={setSelectedTeacher}>
+            <SelectTrigger className="w-full border-cyan-300 bg-cyan-100/70 text-cyan-900 hover:bg-cyan-100 dark:border-cyan-500/40 dark:bg-cyan-500/15 dark:text-cyan-200 dark:hover:bg-cyan-500/20 sm:w-[210px]">
+              <div className="flex items-center gap-2">
+                <UserRound className="h-4 w-4" />
+                <SelectValue placeholder="All Teachers" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Teachers</SelectItem>
+              {teachers.map((teacher) => (
+                <SelectItem key={teacher} value={teacher}>
+                  {teacher}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button onClick={handleOpenCreate}>
             <Plus className="mr-2 h-4 w-4" />
             Add Student
@@ -177,6 +223,7 @@ export function StudentDirectoryTab({
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Batch</TableHead>
+              <TableHead>Teacher</TableHead>
               <TableHead>Join Date</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -205,6 +252,18 @@ export function StudentDirectoryTab({
                   >
                     {isBatchUpdating(student.id) ? "Updating..." : formatBatchLabel(student.batch)}
                   </Button>
+                </TableCell>
+                <TableCell>
+                  {student.teacher ? (
+                    <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-cyan-300 bg-cyan-100 px-3 text-xs font-semibold text-cyan-900 shadow-sm shadow-cyan-200/50 dark:border-cyan-500/40 dark:bg-cyan-500/15 dark:text-cyan-200 dark:shadow-none">
+                      <UserRound className="h-3.5 w-3.5" />
+                      {student.teacher}
+                    </span>
+                  ) : (
+                    <span className="inline-flex h-8 items-center rounded-full border border-dashed border-muted-foreground/40 px-3 text-xs text-muted-foreground">
+                      Unassigned
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell>{formatDate(student.joinDate)}</TableCell>
                 <TableCell>

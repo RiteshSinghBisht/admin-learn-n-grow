@@ -7,9 +7,35 @@ interface CreateUserBody {
   email?: string;
   password?: string;
   role?: UserAccessRole;
+  assignedTeachers?: string[];
 }
 
 const ALLOWED_ROLES: UserAccessRole[] = ["admin", "students_only"];
+
+function normalizeTeacherNames(values: unknown) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  const source = Array.isArray(values) ? values : [];
+
+  source.forEach((value) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const next = value.trim();
+    if (!next) {
+      return;
+    }
+    const key = next.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    normalized.push(next);
+  });
+
+  return normalized;
+}
 
 function getEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -79,6 +105,7 @@ export async function POST(request: Request) {
     const email = body.email?.trim().toLowerCase() ?? "";
     const password = body.password ?? "";
     const role = body.role;
+    const assignedTeachers = normalizeTeacherNames(body.assignedTeachers);
 
     if (!email || !isValidEmail(email)) {
       return NextResponse.json({ message: "Enter a valid email." }, { status: 400 });
@@ -93,6 +120,13 @@ export async function POST(request: Request) {
 
     if (!role || !ALLOWED_ROLES.includes(role)) {
       return NextResponse.json({ message: "Invalid role selected." }, { status: 400 });
+    }
+
+    if (role === "students_only" && assignedTeachers.length === 0) {
+      return NextResponse.json(
+        { message: "Assign at least one teacher for Student Only access." },
+        { status: 400 },
+      );
     }
 
     const { data: created, error: createUserError } = await adminClient.auth.admin.createUser({
@@ -112,6 +146,7 @@ export async function POST(request: Request) {
       {
         user_id: created.user.id,
         role,
+        assigned_teachers: role === "students_only" ? assignedTeachers : [],
       },
       { onConflict: "user_id" },
     );
@@ -124,6 +159,7 @@ export async function POST(request: Request) {
       userId: created.user.id,
       email: created.user.email ?? email,
       role,
+      assignedTeachers: role === "students_only" ? assignedTeachers : [],
       createdAt: created.user.created_at ?? new Date().toISOString(),
     });
   } catch (error) {
