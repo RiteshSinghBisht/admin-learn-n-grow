@@ -1,26 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getApps, initializeApp, cert } from 'firebase-admin/app';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { createClient } from '@supabase/supabase-js';
 
-// Initialize Firebase Admin with credentials from env vars
-if (!getApps().length) {
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+// Create Supabase client with service role key for server-side
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-  if (process.env.FIREBASE_PROJECT_ID && privateKey && process.env.FIREBASE_CLIENT_EMAIL) {
-    initializeApp({
-      credential: cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: privateKey,
-      }),
-    });
-  } else {
-    // Fallback - try default credentials
-    initializeApp();
-  }
-}
-
-const db = getFirestore();
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,21 +20,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create announcement document
-    const docRef = db.collection('announcements').doc();
+    // Insert into Supabase
+    const { data, error } = await supabase
+      .from('announcements')
+      .insert([
+        {
+          title: String(title).trim(),
+          message: String(message).trim(),
+          date: date,
+        },
+      ])
+      .select()
+      .single();
 
-    await docRef.set({
-      title: String(title).trim(),
-      message: String(message).trim(),
-      date: date,
-      createdAt: FieldValue.serverTimestamp(),
-      id: docRef.id,
-    });
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json(
+        { error: 'Failed to create announcement', details: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       message: 'Announcement created successfully',
-      id: docRef.id,
+      id: data.id,
     });
   } catch (error) {
     console.error('Error creating announcement:', error);
@@ -62,19 +57,23 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
-    const snapshot = await db.collection('announcements')
-      .orderBy('date', 'desc')
-      .get();
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('*')
+      .order('date', { ascending: false });
 
-    const announcements = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch announcements', details: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      count: announcements.length,
-      data: announcements,
+      count: data?.length || 0,
+      data: data,
     });
   } catch (error) {
     console.error('Error fetching announcements:', error);
