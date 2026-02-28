@@ -1,0 +1,268 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 213 45% 97%;
+    --foreground: 222 36% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 36% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 36% 14%;
+    --primary: 217 94% 60%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 214 37% 92%;
+    --secondary-foreground: 222 32% 17%;
+    --muted: 214 34% 92%;
+    --muted-foreground: 218 16% 40%;
+    --accent: 215 45% 94%;
+    --accent-foreground: 222 32% 17%;
+    --destructive: 0 75% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 29% 84%;
+    --input: 214 34% 88%;
+    --ring: 217 94% 60%;
+    --radius: 1rem;
+    --sidebar-background: 220 36% 13%;
+    --sidebar-foreground: 210 40% 96%;
+    --sidebar-primary: 215 100% 67%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 223 25% 20%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 224 21% 28%;
+    --sidebar-ring: 215 100% 67%;
+    --font-brand:
+      "SF Pro Text", "SF Pro Display", "Avenir Next", "Segoe UI Variable", "Segoe UI",
+      "Helvetica Neue", sans-serif;
+  }
+
+  .dark {
+    --background: 224 30% 8%;
+    --foreground: 210 32% 95%;
+    --card: 224 30% 11%;
+    --card-foreground: 210 32% 95%;
+    --popover: 224 30% 11%;
+    --popover-foreground: 210 32% 95%;
+    --primary: 214 93% 67%;
+    --primary-foreground: 222 36% 12%;
+    --secondary: 224 23% 18%;
+    --secondary-foreground: 210 32% 95%;
+    --muted: 224 18% 18%;
+    --muted-foreground: 215 15% 70%;
+    --accent: 224 23% 20%;
+    --accent-foreground: 210 32% 95%;
+    --destructive: 0 74% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 224 20% 25%;
+    --input: 224 18% 23%;
+    --ring: 214 93% 67%;
+    --sidebar-background: 224 37% 9%;
+    --sidebar-foreground: 210 28% 96%;
+    --sidebar-primary: 214 93% 67%;
+    --sidebar-primary-foreground: 222 36% 11%;
+    --sidebar-accent: 223 22% 16%;
+    --sidebar-accent-foreground: 210 32% 96%;
+    --sidebar-border: 224 17% 24%;
+    --sidebar-ring: 214 93% 67%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-brand);
+    letter-spacing: -0.01em;
+    background:
+      radial-gradient(1200px 640px at 8% -10%, rgba(84, 144, 255, 0.24), transparent 58%),
+      radial-gradient(820px 540px at 92% 0%, rgba(126, 177, 255, 0.2), transparent 56%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background)) 100%);
+    min-height: 100vh;
+    position: relative;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background:
+      radial-gradient(680px 360px at 30% 120%, rgba(255, 255, 255, 0.4), transparent 66%),
+      linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.2) 0%,
+        rgba(255, 255, 255, 0.04) 32%,
+        transparent 100%
+      );
+    mix-blend-mode: soft-light;
+  }
+
+  .dark body::before {
+    background:
+      radial-gradient(820px 500px at 25% 120%, rgba(129, 170, 255, 0.18), transparent 68%),
+      linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.06) 0%,
+        rgba(255, 255, 255, 0.01) 40%,
+        transparent 100%
+      );
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.03em;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply border border-border/80 bg-white/60 backdrop-blur-2xl dark:border-white/15 dark:bg-white/[0.06];
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.52) inset,
+      0 22px 45px -26px rgba(15, 23, 42, 0.4);
+  }
+
+  .glass-elevated {
+    @apply glass-card;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.62) inset,
+      0 24px 60px -30px rgba(15, 23, 42, 0.55);
+  }
+
+  .page-title {
+    @apply text-3xl font-semibold md:text-4xl;
+  }
+
+  .page-subtitle {
+    @apply mt-1 text-sm text-muted-foreground md:text-base;
+  }
+
+  .hairline {
+    @apply border border-border/80 dark:border-white/15;
+  }
+
+  .text-gradient {
+    background: linear-gradient(120deg, hsl(var(--foreground)), hsl(var(--primary)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .text-crisp {
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-kerning: normal;
+    letter-spacing: 0;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0, "tnum" 1;
+  }
+
+  .animate-fade-up {
+    animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .animate-float-slow {
+    animation: float-slow 14s ease-in-out infinite;
+  }
+
+  .animate-float-delayed {
+    animation: float-slow 18s ease-in-out -4s infinite;
+  }
+
+  .animate-stat-pop {
+    animation: stat-pop 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .animate-liquid-orb {
+    animation: liquid-orb 11s ease-in-out infinite;
+  }
+
+  .animate-liquid-orb-delayed {
+    animation: liquid-orb-delayed 15s ease-in-out -3.2s infinite;
+  }
+
+  .animate-liquid-sheen {
+    animation: liquid-sheen 6.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+}
+
+@keyframes fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0) translateX(0);
+  }
+  50% {
+    transform: translateY(-14px) translateX(8px);
+  }
+}
+
+@keyframes stat-pop {
+  0% {
+    opacity: 0.4;
+    transform: translateY(4px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes liquid-orb {
+  0%,
+  100% {
+    transform: translate3d(-10%, -8%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(14%, 11%, 0) scale(1.2);
+  }
+}
+
+@keyframes liquid-orb-delayed {
+  0%,
+  100% {
+    transform: translate3d(11%, -9%, 0) scale(1.08);
+  }
+  50% {
+    transform: translate3d(-13%, 10%, 0) scale(0.9);
+  }
+}
+
+@keyframes liquid-sheen {
+  0% {
+    background-position: 115% 50%;
+  }
+  100% {
+    background-position: -115% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
