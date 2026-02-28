@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import type { LucideIcon } from "lucide-react";
 import { ArrowUpRight, Calendar as CalendarIcon, Link as LinkIcon, MessageSquare } from "lucide-react";
 
 import { Button } from "@/components/ui/button";

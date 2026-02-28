@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { firestore, initializeApp, getApps } from 'firebase-admin';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 
 // Initialize Firebase Admin (only once) - works on Vercel with FIREBASE_CONFIG
 if (!getApps().length) {
   initializeApp();
 }
 
-const db = firestore();
+const db = getFirestore();
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
       title: String(title).trim(),
       message: String(message).trim(),
       date: date,
-      createdAt: firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
       id: docRef.id,
     });
 
@@ -52,7 +53,7 @@ export async function GET() {
       .orderBy('date', 'desc')
       .get();
 
-    const announcements = snapshot.docs.map((doc: any) => ({
+    const announcements = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
