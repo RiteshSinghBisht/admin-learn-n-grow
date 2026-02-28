@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Building2, MapPin, Phone, UserRound } from "lucide-react";
+import { Building2, MapPin, Phone, UserRound, LogOut } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/components/providers/auth-provider";
 import type { BusinessProfile } from "@/lib/types";
 
 interface ProfileCardProps {
@@ -18,6 +20,8 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
   const [formState, setFormState] = React.useState(profile);
   const [saving, setSaving] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  const { isAuthEnabled, signOut } = useAuth();
+  const router = useRouter();
 
   const inputClassName =
     "h-11 rounded-lg border border-slate-300 bg-white px-4 pl-10 text-sm dark:border-slate-600 dark:bg-slate-800";
@@ -37,6 +41,11 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleLogout() {
+    await signOut();
+    router.push("/login");
   }
 
   return (
@@ -139,6 +148,25 @@ export function ProfileCard({ profile, onSave }: ProfileCardProps) {
             </Button>
           </div>
         </form>
+
+        {isAuthEnabled && (
+          <div className="mt-6 border-t border-slate-200 pt-6 dark:border-slate-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-slate-900 dark:text-white">Sign Out</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Sign out of your account</p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleLogout}
+                className="gap-2"
+              >
+                <LogOut className="h-4 w-4" />
+                Log Out
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
