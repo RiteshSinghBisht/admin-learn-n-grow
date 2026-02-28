@@ -1,10 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getApps, initializeApp } from 'firebase-admin/app';
+import { getApps, initializeApp, cert } from 'firebase-admin/app';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 
-// Initialize Firebase Admin (only once) - works on Vercel with FIREBASE_CONFIG
+// Initialize Firebase Admin with credentials from env vars
 if (!getApps().length) {
-  initializeApp();
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+  if (process.env.FIREBASE_PROJECT_ID && privateKey && process.env.FIREBASE_CLIENT_EMAIL) {
+    initializeApp({
+      credential: cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: privateKey,
+      }),
+    });
+  } else {
+    // Fallback - try default credentials
+    initializeApp();
+  }
 }
 
 const db = getFirestore();
@@ -66,7 +79,7 @@ export async function GET() {
   } catch (error) {
     console.error('Error fetching announcements:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch announcements' },
+      { error: 'Failed to fetch announcements', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
