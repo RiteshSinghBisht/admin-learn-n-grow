@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Create Supabase client with service role key for server-side
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+function getSupabaseServerClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error(
+      'Supabase server setup is incomplete. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+    );
+  }
+
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseServerClient();
     const body = await request.json();
     const { title, message, date } = body;
 
@@ -57,6 +67,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
+    const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
       .from('announcements')
       .select('*')
