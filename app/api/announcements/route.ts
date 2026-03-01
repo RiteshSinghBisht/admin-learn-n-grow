@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// CORS headers for local development
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
 function getSupabaseServerClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -26,7 +33,8 @@ export async function POST(request: NextRequest) {
     if (!title || !message || !date) {
       return NextResponse.json(
         { error: 'Missing required fields: title, message, date' },
-        { status: 400 }
+        { status: 400 },
+        { headers: corsHeaders }
       );
     }
 
@@ -47,20 +55,24 @@ export async function POST(request: NextRequest) {
       console.error('Supabase error:', error);
       return NextResponse.json(
         { error: 'Failed to create announcement', details: error.message },
-        { status: 500 }
+        { status: 500, headers: corsHeaders }
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Announcement created successfully',
       id: data.id,
     });
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
   } catch (error) {
     console.error('Error creating announcement:', error);
     return NextResponse.json(
       { error: 'Failed to create announcement', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
+      { status: 500, headers: corsHeaders }
     );
   }
 }
@@ -75,23 +87,35 @@ export async function GET() {
 
     if (error) {
       console.error('Supabase error:', error);
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: 'Failed to fetch announcements', details: error.message },
         { status: 500 }
       );
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      return response;
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       count: data?.length || 0,
       data: data,
     });
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
   } catch (error) {
     console.error('Error fetching announcements:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: 'Failed to fetch announcements', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
   }
 }
 
@@ -102,10 +126,14 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get('id');
 
     if (!id) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: 'Missing announcement ID' },
         { status: 400 }
       );
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      return response;
     }
 
     const { error } = await supabase
@@ -115,21 +143,41 @@ export async function DELETE(request: NextRequest) {
 
     if (error) {
       console.error('Supabase error:', error);
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: 'Failed to delete announcement', details: error.message },
         { status: 500 }
       );
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      return response;
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Announcement deleted successfully',
     });
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
   } catch (error) {
     console.error('Error deleting announcement:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: 'Failed to delete announcement', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
   }
+}
+
+// Handle CORS preflight requests
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
 }
