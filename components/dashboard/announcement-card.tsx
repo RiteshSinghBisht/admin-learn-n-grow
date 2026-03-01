@@ -34,8 +34,11 @@ interface AnnouncementCardProps {
 
 export function AnnouncementCard({ className, inverted = true }: AnnouncementCardProps) {
   const [open, setOpen] = useState(false);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [dateError, setDateError] = useState(false);
 
   // Form state
   const [title, setTitle] = useState("");
@@ -66,7 +69,17 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !message || !title) return;
+
+    // Check if date is selected
+    if (!date) {
+      setDateError(true);
+      return;
+    }
+
+    if (!message || !title) return;
+
+    setSubmitting(true);
+    setDateError(false);
 
     try {
       const formattedDate = date.toISOString().split("T")[0];
@@ -93,6 +106,8 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     } catch (error) {
       console.error('Error:', error);
       alert('Failed to create announcement');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -125,7 +140,17 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !message || !title || !editingId) return;
+
+    // Check if date is selected
+    if (!date) {
+      setDateError(true);
+      return;
+    }
+
+    if (!message || !title || !editingId) return;
+
+    setSubmitting(true);
+    setDateError(false);
 
     try {
       const formattedDate = date.toISOString().split("T")[0];
@@ -155,6 +180,8 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     } catch (error) {
       console.error('Error:', error);
       alert('Failed to update');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -163,6 +190,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     setMessage("");
     setDate(undefined);
     setEditingId(null);
+    setDateError(false);
   };
 
   const Icon = MessageSquare;
@@ -312,7 +340,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
 
             <div className="grid gap-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Date</label>
-              <Popover>
+              <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     type="button"
@@ -320,6 +348,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
                     className={cn(
                       "w-full justify-start rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-left text-sm font-normal text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700",
                       !date && "text-slate-500 dark:text-slate-400",
+                      dateError && "border-red-500 dark:border-red-500"
                     )}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
@@ -330,21 +359,31 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
                   <Calendar
                     mode="single"
                     selected={date}
-                    onSelect={setDate}
+                    onSelect={(selectedDate) => {
+                      setDate(selectedDate);
+                      setDateError(false);
+                      setDatePickerOpen(false);
+                    }}
                   />
                 </PopoverContent>
               </Popover>
+              {dateError && (
+                <p className="text-sm text-red-500 dark:text-red-400">Please select a date</p>
+              )}
             </div>
           </div>
 
           <div className="flex gap-2 justify-end">
             {editingId && (
-              <Button type="button" variant="outline" onClick={resetForm}>
+              <Button type="button" variant="outline" onClick={resetForm} disabled={submitting}>
                 Cancel
               </Button>
             )}
-            <Button type="submit">
-              {editingId ? 'Update Announcement' : 'Add Announcement'}
+            <Button type="submit" disabled={submitting}>
+              {submitting
+                ? (editingId ? 'Updating...' : 'Creating...')
+                : (editingId ? 'Update Announcement' : 'Add Announcement')
+              }
             </Button>
           </div>
         </form>
