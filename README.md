@@ -31,22 +31,6 @@ Admin dashboard for managing a coaching/tuition center: students, attendance, fi
 - `/settings` - Profile/preferences/data
 - `/login` - Authentication
 
-## Environment Variables
-
-Create a `.env.local` in project root:
-
-```env
-NEXT_PUBLIC_USE_SUPABASE=true
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-```
-
-Notes:
-
-- `NEXT_PUBLIC_*` variables are exposed to the browser.
-- `SUPABASE_SERVICE_ROLE_KEY` is server-only and used by API routes.
-- If `NEXT_PUBLIC_USE_SUPABASE=false`, the app runs in mock-data mode and auth-gated features are disabled.
 
 ## Local Setup
 
@@ -128,13 +112,4 @@ vercel link
 vercel deploy -y --target preview
 vercel deploy --prod -y
 ```
-
-## Troubleshooting
-
-- `Enable Supabase auth to manage user access.` on Access Management:
-  - `NEXT_PUBLIC_USE_SUPABASE` is not `true` or Supabase URL/key is missing in that environment.
-- Logout button not visible:
-  - Auth is disabled in current environment (same root cause as above).
-- `Only admins can manage user access`:
-  - Logged-in user exists but has no `admin` role in `app_user_roles`.
 
