@@ -33,8 +33,7 @@ export async function POST(request: NextRequest) {
     if (!title || !message || !date) {
       return NextResponse.json(
         { error: 'Missing required fields: title, message, date' },
-        { status: 400 },
-        { headers: corsHeaders }
+        { status: 400, headers: corsHeaders }
       );
     }
 
