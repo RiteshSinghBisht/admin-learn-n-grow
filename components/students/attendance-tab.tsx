@@ -42,7 +42,7 @@ interface AttendanceTabProps {
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-type MonthlyDayKind = "present" | "absent" | "weekend" | "unmarked";
+type MonthlyDayKind = "present" | "absent" | "unmarked";
 
 interface MonthlyDayCell {
   date: Date;
@@ -84,21 +84,6 @@ function parseMonthValue(value: string) {
   return new Date(year, month - 1, 1);
 }
 
-function getNearestWeekday(date: Date) {
-  const day = date.getDay();
-  if (day === 0) {
-    const adjusted = new Date(date);
-    adjusted.setDate(adjusted.getDate() + 1);
-    return adjusted;
-  }
-  if (day === 6) {
-    const adjusted = new Date(date);
-    adjusted.setDate(adjusted.getDate() + 2);
-    return adjusted;
-  }
-  return date;
-}
-
 function formatBatchLabel(batch: StudentBatch) {
   return batch === "morning" ? "Morning Session" : "Evening Session";
 }
@@ -106,9 +91,7 @@ function formatBatchLabel(batch: StudentBatch) {
 function getMonthlyCellTooltip(cell: MonthlyDayCell) {
   const lines = [format(cell.date, "PPP")];
 
-  if (cell.kind === "weekend") {
-    lines.push("Status: Weekend / Non-working day");
-  } else if (cell.kind === "present") {
+  if (cell.kind === "present") {
     lines.push("Status: Present");
   } else if (cell.kind === "absent") {
     lines.push("Status: Absent");
@@ -130,11 +113,9 @@ export function AttendanceTab({
   onSaveAttendance,
 }: AttendanceTabProps) {
   const [calendarOpen, setCalendarOpen] = React.useState(false);
-  const [selectedDate, setSelectedDate] = React.useState<Date>(() =>
-    getNearestWeekday(new Date()),
-  );
+  const [selectedDate, setSelectedDate] = React.useState<Date>(() => new Date());
   const [selectedMonth, setSelectedMonth] = React.useState<string>(() =>
-    monthValueFromDate(getNearestWeekday(new Date())),
+    monthValueFromDate(new Date()),
   );
   const [selectedBatch, setSelectedBatch] = React.useState<StudentBatch>("morning");
   const [selectedTeacher, setSelectedTeacher] = React.useState<string>("all");
@@ -294,12 +275,11 @@ export function AttendanceTab({
 
     let presentDays = 0;
     let absentDays = 0;
-    let workingDays = 0;
+    let totalDays = 0;
 
     for (let dayNumber = 1; dayNumber <= daysInMonth; dayNumber += 1) {
       const date = new Date(year, monthIndex, dayNumber);
       const dateKey = toDateKey(date);
-      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
       const record = getAttendanceForDate(dateKey).find(
         (entry) => entry.studentId === selectedStudent.id,
       );
@@ -310,18 +290,7 @@ export function AttendanceTab({
       const resolvedStatus = draftStatus ?? record?.status;
       const resolvedNote = draftNote ?? record?.note;
 
-      if (isWeekend) {
-        dayCells.push({
-          date,
-          dateKey,
-          dayNumber,
-          kind: "weekend",
-          note: resolvedNote,
-        });
-        continue;
-      }
-
-      workingDays += 1;
+      totalDays += 1;
 
       if (resolvedStatus === "present") {
         presentDays += 1;
@@ -354,7 +323,7 @@ export function AttendanceTab({
 
     const trailingEmptyCells = (7 - ((leadingEmptyCells + dayCells.length) % 7)) % 7;
     const attendancePercentage =
-      workingDays > 0 ? Math.round((presentDays / workingDays) * 1000) / 10 : 0;
+      totalDays > 0 ? Math.round((presentDays / totalDays) * 1000) / 10 : 0;
 
     return {
       dayCells,
@@ -362,7 +331,7 @@ export function AttendanceTab({
       trailingEmptyCells,
       presentDays,
       absentDays,
-      workingDays,
+      totalDays,
       attendancePercentage,
       monthLabel: format(monthDate, "MMMM yyyy"),
     };
@@ -448,14 +417,9 @@ export function AttendanceTab({
                     return;
                   }
 
-                  if (date.getDay() === 0 || date.getDay() === 6) {
-                    return;
-                  }
-
                   setSelectedDate(date);
                   setCalendarOpen(false);
                 }}
-                disabled={(date) => date.getDay() === 0 || date.getDay() === 6}
                 fixedWeeks
                 initialFocus
               />
@@ -698,18 +662,11 @@ export function AttendanceTab({
                       "border-emerald-300/70 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/12 dark:text-emerald-200",
                     cell.kind === "absent" &&
                       "border-rose-300/70 bg-rose-500/15 text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/12 dark:text-rose-200",
-                    cell.kind === "weekend" &&
-                      "border-border/70 bg-slate-200/55 text-muted-foreground dark:border-white/15 dark:bg-white/[0.04]",
                     cell.kind === "unmarked" &&
                       "border-border/70 bg-background/60 text-muted-foreground dark:border-white/12 dark:bg-white/[0.02]",
                   )}
                 >
-                  <p
-                    className={cn(
-                      "text-sm font-semibold",
-                      cell.kind === "weekend" && "line-through opacity-80",
-                    )}
-                  >
+                  <p className="text-sm font-semibold">
                     {cell.dayNumber}
                   </p>
 
@@ -718,17 +675,14 @@ export function AttendanceTab({
                       "mt-4 text-[10px] font-medium uppercase tracking-[0.14em]",
                       cell.kind === "present" && "text-emerald-700 dark:text-emerald-300",
                       cell.kind === "absent" && "text-rose-700 dark:text-rose-300",
-                      (cell.kind === "weekend" || cell.kind === "unmarked") &&
-                        "text-muted-foreground",
+                      cell.kind === "unmarked" && "text-muted-foreground",
                     )}
                   >
-                    {cell.kind === "weekend"
-                      ? "Weekend"
-                      : cell.kind === "present"
-                        ? "Present"
-                        : cell.kind === "absent"
-                          ? "Absent"
-                          : "Not Marked"}
+                    {cell.kind === "present"
+                      ? "Present"
+                      : cell.kind === "absent"
+                        ? "Absent"
+                        : "Not Marked"}
                   </p>
                 </div>
               ))}
@@ -764,8 +718,8 @@ export function AttendanceTab({
               </div>
 
               <div className="rounded-xl border border-border/80 bg-white/60 p-3 dark:border-white/15 dark:bg-white/[0.05]">
-                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Working Days in Month</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">{monthlyView.workingDays}</p>
+                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Days in Month</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">{monthlyView.totalDays}</p>
               </div>
             </div>
 
