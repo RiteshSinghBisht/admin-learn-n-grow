@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link as LinkIcon, Plus, Edit, Trash2, ExternalLink, CheckCircle, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,10 @@ interface ToastState {
   variant: ToastVariant;
 }
 
+interface CustomLinksSectionProps {
+  excludeTitles?: string[];
+}
+
 // Pre-defined icon options
 const ICON_OPTIONS = [
   { value: 'Link', label: 'Link', icon: LinkIcon },
@@ -56,7 +60,7 @@ function getGradient(index: number): string {
   return GRADIENTS[index % GRADIENTS.length];
 }
 
-export function CustomLinksSection() {
+export function CustomLinksSection({ excludeTitles = [] }: CustomLinksSectionProps) {
   const [open, setOpen] = useState(false);
   const [links, setLinks] = useState<CustomLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -216,6 +220,22 @@ export function CustomLinksSection() {
     setEditingId(null);
   };
 
+  const excludedTitlesSet = useMemo(
+    () =>
+      new Set(
+        excludeTitles.map((value) => value.trim().toLowerCase()).filter(Boolean),
+      ),
+    [excludeTitles],
+  );
+
+  const visibleLinks = useMemo(() => {
+    if (!excludedTitlesSet.size) {
+      return links;
+    }
+
+    return links.filter((link) => !excludedTitlesSet.has(link.title.trim().toLowerCase()));
+  }, [links, excludedTitlesSet]);
+
   return (
     <section className="rounded-3xl border border-border/80 bg-white/50 p-5 shadow-[0_20px_50px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/15 dark:bg-white/[0.03] md:p-6">
       <div className="mb-5 flex items-center justify-between">
@@ -228,12 +248,12 @@ export function CustomLinksSection() {
           onClick={() => setOpen(true)}
         >
           <Edit className="mr-1.5 h-3 w-3" />
-          {links.length} Links
+          {visibleLinks.length} Links
         </span>
       </div>
 
       {/* Links Grid */}
-      {links.length === 0 ? (
+      {visibleLinks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 py-12 text-center dark:border-slate-700 dark:bg-slate-800/50">
           <LinkIcon className="h-10 w-10 text-slate-400" />
           <p className="mt-3 text-sm font-medium text-slate-600 dark:text-slate-400">No custom links yet</p>
@@ -241,7 +261,7 @@ export function CustomLinksSection() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {links.map((link, index) => (
+          {visibleLinks.map((link, index) => (
             <a
               key={link.id}
               href={link.url}
@@ -300,10 +320,10 @@ export function CustomLinksSection() {
             <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200">Your Links</h4>
             {loading ? (
               <p className="text-sm text-slate-600 dark:text-slate-400">Loading...</p>
-            ) : links.length === 0 ? (
+            ) : visibleLinks.length === 0 ? (
               <p className="text-sm text-slate-600 dark:text-slate-400">No links added yet. Add one below!</p>
             ) : (
-              links.map((link) => (
+              visibleLinks.map((link) => (
                 <div
                   key={link.id}
                   className="flex items-start justify-between rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800"

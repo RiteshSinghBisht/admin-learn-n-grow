@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import {
   Database,
+  Globe,
   MessageCircle,
   MessageSquare,
   Sparkles,
@@ -20,12 +22,48 @@ import { CURRENCY_SYMBOL } from "@/lib/constants";
 import { calculateDashboardMetrics } from "@/lib/dashboard-metrics";
 import { useAppData } from "@/components/providers/app-data-provider";
 
+interface CustomQuickLink {
+  id: string;
+  title: string;
+  url: string;
+  display_order: number;
+}
+
 function formatCurrency(amount: number) {
   return `${CURRENCY_SYMBOL}${amount.toLocaleString("en-IN")}`;
 }
 
 export default function DashboardPage() {
   const { students, finances, loading } = useAppData();
+  const [customLinks, setCustomLinks] = useState<CustomQuickLink[]>([]);
+  const learnAndGrowLink = useMemo(
+    () => customLinks.find((link) => link.title.trim().toLowerCase() === "learn n grow"),
+    [customLinks],
+  );
+  const quickAccessCount = 5 + (learnAndGrowLink ? 1 : 0);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function fetchCustomLinks() {
+      try {
+        const response = await fetch("/api/custom-links");
+        const result = await response.json();
+        if (!mounted || !result.success) {
+          return;
+        }
+        setCustomLinks(result.data || []);
+      } catch (error) {
+        console.error("Error fetching custom links for quick access:", error);
+      }
+    }
+
+    fetchCustomLinks();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -89,7 +127,7 @@ export default function DashboardPage() {
             <p className="mt-1 text-sm text-muted-foreground">Jump directly to your key workflows</p>
           </div>
           <span className="hidden rounded-full border border-border/80 bg-white/65 px-3 py-1 text-xs font-medium text-muted-foreground dark:border-white/15 dark:bg-white/[0.06] md:inline-flex">
-            5 Tools
+            {quickAccessCount} Tools
           </span>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -101,6 +139,16 @@ export default function DashboardPage() {
             className="bg-gradient-to-br from-[#7c3aed] via-[#d946ef] to-[#4338ca] text-white"
             inverted
           />
+          {learnAndGrowLink ? (
+            <ToolCard
+              title={learnAndGrowLink.title}
+              description="Open Learn N Grow portal"
+              href={learnAndGrowLink.url}
+              icon={Globe}
+              className="bg-gradient-to-br from-[#0f766e] via-[#0ea5e9] to-[#1d4ed8] text-white"
+              inverted
+            />
+          ) : null}
           <ToolCard
             title="Fluent Bot"
             description="Practice and polish English communication"
@@ -131,7 +179,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <CustomLinksSection />
+      <CustomLinksSection excludeTitles={["Learn N Grow"]} />
     </div>
   );
 }
