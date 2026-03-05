@@ -40,6 +40,31 @@ interface AnnouncementCardProps {
   inverted?: boolean;
 }
 
+function toLocalDateString(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseAnnouncementDate(dateValue: string) {
+  const [year, month, day] = dateValue.split("-").map(Number);
+
+  if (
+    Number.isInteger(year) &&
+    Number.isInteger(month) &&
+    Number.isInteger(day) &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= 31
+  ) {
+    return new Date(year, month - 1, day);
+  }
+
+  return new Date(dateValue);
+}
+
 export function AnnouncementCard({ className, inverted = true }: AnnouncementCardProps) {
   const [open, setOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -131,7 +156,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     setDateError(false);
 
     try {
-      const formattedDate = date.toISOString().split("T")[0];
+      const formattedDate = toLocalDateString(date);
 
       const response = await fetch('/api/announcements', {
         method: 'POST',
@@ -163,7 +188,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
   const handleEdit = (announcement: Announcement) => {
     setTitle(announcement.title);
     setMessage(announcement.message);
-    setDate(new Date(announcement.date));
+    setDate(parseAnnouncementDate(announcement.date));
     setEditingId(announcement.id);
   };
 
@@ -182,7 +207,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     setDateError(false);
 
     try {
-      const formattedDate = date.toISOString().split("T")[0];
+      const formattedDate = toLocalDateString(date);
 
       // Delete old and create new (since we don't have update endpoint)
       await fetch(`/api/announcements?id=${editingId}`, { method: 'DELETE' });
@@ -303,7 +328,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
                   <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{announcement.title}</p>
                   <p className="line-clamp-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{announcement.message}</p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {new Date(announcement.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {parseAnnouncementDate(announcement.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                   </p>
                 </div>
                 <div className="ml-2 flex gap-1">
