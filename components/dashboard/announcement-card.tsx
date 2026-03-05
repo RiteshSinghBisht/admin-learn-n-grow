@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowUpRight, Calendar as CalendarIcon, MessageSquare, Edit, Trash2 } from "lucide-react";
+import { ArrowUpRight, Calendar as CalendarIcon, MessageSquare, Edit, Trash2, CheckCircle, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -18,6 +18,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+
+// Toast types
+type ToastVariant = "success" | "error";
+
+interface ToastState {
+  message: string;
+  variant: ToastVariant;
+}
 
 interface Announcement {
   id: string;
@@ -39,6 +47,47 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [dateError, setDateError] = useState(false);
+
+  // Toast state
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, variant: ToastVariant) => {
+    setToast({ message, variant });
+  };
+
+  const handleDeleteClick = (id: string, title: string) => {
+    setConfirmDelete({ id, title });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDelete) return;
+
+    try {
+      const response = await fetch(`/api/announcements?id=${confirmDelete.id}`, {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        showToast('Announcement deleted successfully!', 'success');
+        fetchAnnouncements();
+      } else {
+        showToast('Failed to delete: ' + result.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showToast('Failed to delete', 'error');
+    }
+    setConfirmDelete(null);
+  };
 
   // Form state
   const [title, setTitle] = useState("");
@@ -97,37 +146,17 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
       const result = await response.json();
 
       if (result.success) {
-        alert('Announcement created successfully!');
+        showToast('Announcement created successfully!', 'success');
         resetForm();
         fetchAnnouncements();
       } else {
-        alert('Failed: ' + result.error);
+        showToast('Failed: ' + result.error, 'error');
       }
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to create announcement');
+      showToast('Failed to create announcement', 'error');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this announcement?')) return;
-
-    try {
-      const response = await fetch(`/api/announcements?id=${id}`, {
-        method: 'DELETE'
-      });
-      const result = await response.json();
-
-      if (result.success) {
-        fetchAnnouncements();
-      } else {
-        alert('Failed to delete: ' + result.error);
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Failed to delete');
     }
   };
 
@@ -171,15 +200,15 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
       const result = await response.json();
 
       if (result.success) {
-        alert('Announcement updated successfully!');
+        showToast('Announcement updated successfully!', 'success');
         resetForm();
         fetchAnnouncements();
       } else {
-        alert('Failed: ' + result.error);
+        showToast('Failed: ' + result.error, 'error');
       }
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to update');
+      showToast('Failed to update', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -290,7 +319,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-900/30 dark:hover:text-red-300"
-                    onClick={() => handleDelete(announcement.id)}
+                    onClick={() => handleDeleteClick(announcement.id, announcement.title)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -308,6 +337,56 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
           <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200">
             {editingId ? 'Edit Announcement' : 'Add New Announcement'}
           </h4>
+
+          {/* Inline Toast Message */}
+          {toast && (
+            <div
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",
+                toast.variant === "success"
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                  : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+              )}
+            >
+              {toast.variant === "success" ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <XCircle className="h-4 w-4" />
+              )}
+              {toast.message}
+            </div>
+          )}
+
+          {/* Delete Confirmation */}
+          {confirmDelete && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
+              <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                Delete "{confirmDelete.title}"?
+              </p>
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                This action cannot be undone.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirmDelete(null)}
+                  className="border-red-300 text-red-700 hover:bg-red-100 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleConfirmDelete}
+                  className="bg-red-600 text-white hover:bg-red-700"
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-4">
             <div className="grid gap-2">

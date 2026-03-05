@@ -14,6 +14,7 @@ import {
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { ToolCard } from "@/components/dashboard/tool-card";
 import { AnnouncementCard } from "@/components/dashboard/announcement-card";
+import { CustomLinksSection } from "@/components/dashboard/custom-links-section";
 import { Card, CardContent } from "@/components/ui/card";
 import { CURRENCY_SYMBOL } from "@/lib/constants";
 import { calculateDashboardMetrics } from "@/lib/dashboard-metrics";
@@ -129,6 +130,8 @@ export default function DashboardPage() {
           />
         </div>
       </section>
+
+      <CustomLinksSection />
     </div>
   );
 }
