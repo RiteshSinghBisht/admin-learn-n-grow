@@ -27,7 +27,7 @@ export default function AccessManagementPage() {
           <div>
             <h2 className="text-base font-semibold">Admin Access Required</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Only admins can view and manage user access roles.
+              Only admins can view and manage user access settings.
             </p>
           </div>
         </CardContent>
@@ -39,7 +39,7 @@ export default function AccessManagementPage() {
     <div className="space-y-8 pt-1 md:pt-2">
       <div>
         <h1 className="page-title">Access Management</h1>
-        <p className="page-subtitle">Add users and control role-based access for this admin panel.</p>
+        <p className="page-subtitle">Add users and control admin, student, and task access for this panel.</p>
       </div>
       <AccessManagementCard />
     </div>

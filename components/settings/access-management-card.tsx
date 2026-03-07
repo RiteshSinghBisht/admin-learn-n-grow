@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {
+  ClipboardList,
   CircleSlash,
   RefreshCw,
   ShieldCheck,
@@ -41,12 +42,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { dataService } from "@/lib/data-service";
-import type { UserAccess, UserAccessRole, UserDeleteMode } from "@/lib/types";
+import { normalizeAccessScopes } from "@/lib/access-control";
+import type { AppAccessScope, UserAccess, UserAccessRole, UserDeleteMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ROLE_OPTIONS: Array<{ value: UserAccessRole; label: string }> = [
-  { value: "admin", label: "Full Access (Admin)" },
-  { value: "students_only", label: "Student Only" },
+  { value: "admin", label: "Admin" },
+  { value: "member", label: "Custom Access" },
+];
+
+const ACCESS_OPTIONS: Array<{ value: AppAccessScope; label: string; icon: typeof Users }> = [
+  { value: "students", label: "Student Access", icon: Users },
+  { value: "tasks", label: "Task Access", icon: ClipboardList },
 ];
 
 function parseTeacherNames(value: string) {
@@ -74,9 +81,17 @@ function formatTeacherNames(values: string[] | undefined) {
 }
 
 function roleLabel(value: UserAccessRole | null) {
-  if (value === "admin") return "Full Access";
-  if (value === "students_only") return "Student Only";
+  if (value === "admin") return "Admin";
+  if (value === "member") return "Custom Access";
   return "Unassigned";
+}
+
+function scopeLabel(value: AppAccessScope) {
+  return value === "students" ? "Student Access" : "Task Access";
+}
+
+function toggleAccessScope(values: AppAccessScope[], scope: AppAccessScope) {
+  return values.includes(scope) ? values.filter((value) => value !== scope) : [...values, scope];
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -107,6 +122,9 @@ export function AccessManagementCard() {
   const [selectedRoleByUser, setSelectedRoleByUser] = React.useState<Record<string, UserAccessRole>>(
     {},
   );
+  const [selectedScopesByUser, setSelectedScopesByUser] = React.useState<Record<string, AppAccessScope[]>>(
+    {},
+  );
   const [selectedTeachersByUser, setSelectedTeachersByUser] = React.useState<Record<string, string>>(
     {},
   );
@@ -117,7 +135,8 @@ export function AccessManagementCard() {
   const [searchTerm, setSearchTerm] = React.useState("");
   const [createEmail, setCreateEmail] = React.useState("");
   const [createPassword, setCreatePassword] = React.useState("");
-  const [createRole, setCreateRole] = React.useState<UserAccessRole>("students_only");
+  const [createRole, setCreateRole] = React.useState<UserAccessRole>("member");
+  const [createAccessScopes, setCreateAccessScopes] = React.useState<AppAccessScope[]>([]);
   const [createAssignedTeachers, setCreateAssignedTeachers] = React.useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [deleteTargetUser, setDeleteTargetUser] = React.useState<UserAccess | null>(null);
@@ -151,7 +170,11 @@ export function AccessManagementCard() {
       try {
         const users = await dataService.listUserAccess();
         const nextSelection = users.reduce<Record<string, UserAccessRole>>((acc, item) => {
-          acc[item.userId] = item.role ?? "students_only";
+          acc[item.userId] = item.role ?? "member";
+          return acc;
+        }, {});
+        const nextScopes = users.reduce<Record<string, AppAccessScope[]>>((acc, item) => {
+          acc[item.userId] = item.accessScopes ?? [];
           return acc;
         }, {});
         const nextTeachers = users.reduce<Record<string, string>>((acc, item) => {
@@ -160,6 +183,7 @@ export function AccessManagementCard() {
         }, {});
         setRecords(users);
         setSelectedRoleByUser(nextSelection);
+        setSelectedScopesByUser(nextScopes);
         setSelectedTeachersByUser(nextTeachers);
       } catch (loadError) {
         setError(getErrorMessage(loadError, "Failed to load access records."));
@@ -194,6 +218,7 @@ export function AccessManagementCard() {
     if (!selectedRole) {
       return;
     }
+    const selectedScopes = normalizeAccessScopes(selectedScopesByUser[userId]);
     const assignedTeachers = parseTeacherNames(selectedTeachersByUser[userId] ?? "");
 
     if (user?.id === userId && selectedRole !== "admin") {
@@ -201,8 +226,13 @@ export function AccessManagementCard() {
       return;
     }
 
-    if (selectedRole === "students_only" && !assignedTeachers.length) {
-      setError("Assign at least one teacher for Student Only access.");
+    if (selectedRole === "member" && selectedScopes.length === 0) {
+      setError("Select at least one access permission.");
+      return;
+    }
+
+    if (selectedRole === "member" && selectedScopes.includes("students") && !assignedTeachers.length) {
+      setError("Assign at least one teacher for Student Access.");
       return;
     }
 
@@ -213,7 +243,8 @@ export function AccessManagementCard() {
       await dataService.updateUserAccessRole(
         userId,
         selectedRole,
-        selectedRole === "students_only" ? assignedTeachers : [],
+        selectedRole === "admin" ? [] : selectedScopes,
+        selectedRole === "admin" || !selectedScopes.includes("students") ? [] : assignedTeachers,
       );
       setRecords((prev) =>
         prev.map((item) =>
@@ -221,7 +252,11 @@ export function AccessManagementCard() {
             ? {
                 ...item,
                 role: selectedRole,
-                assignedTeachers: selectedRole === "students_only" ? assignedTeachers : [],
+                accessScopes: selectedRole === "admin" ? [] : selectedScopes,
+                assignedTeachers:
+                  selectedRole === "admin" || !selectedScopes.includes("students")
+                    ? []
+                    : assignedTeachers,
               }
             : item,
         ),
@@ -241,6 +276,7 @@ export function AccessManagementCard() {
 
   async function handleCreateUser() {
     const email = createEmail.trim().toLowerCase();
+    const normalizedCreateScopes = normalizeAccessScopes(createAccessScopes);
     const assignedTeachers = parseTeacherNames(createAssignedTeachers);
     if (!email) {
       setError("Email is required.");
@@ -252,8 +288,13 @@ export function AccessManagementCard() {
       return;
     }
 
-    if (createRole === "students_only" && !assignedTeachers.length) {
-      setError("Assign at least one teacher for Student Only access.");
+    if (createRole === "member" && normalizedCreateScopes.length === 0) {
+      setError("Select at least one access permission.");
+      return;
+    }
+
+    if (createRole === "member" && normalizedCreateScopes.includes("students") && !assignedTeachers.length) {
+      setError("Assign at least one teacher for Student Access.");
       return;
     }
 
@@ -266,7 +307,11 @@ export function AccessManagementCard() {
         email,
         password: createPassword,
         role: createRole,
-        assignedTeachers: createRole === "students_only" ? assignedTeachers : [],
+        accessScopes: createRole === "admin" ? [] : normalizedCreateScopes,
+        assignedTeachers:
+          createRole === "admin" || !normalizedCreateScopes.includes("students")
+            ? []
+            : assignedTeachers,
       });
 
       setRecords((prev) => {
@@ -282,7 +327,11 @@ export function AccessManagementCard() {
 
       setSelectedRoleByUser((prev) => ({
         ...prev,
-        [created.userId]: created.role ?? "students_only",
+        [created.userId]: created.role ?? "member",
+      }));
+      setSelectedScopesByUser((prev) => ({
+        ...prev,
+        [created.userId]: created.accessScopes ?? [],
       }));
       setSelectedTeachersByUser((prev) => ({
         ...prev,
@@ -291,7 +340,8 @@ export function AccessManagementCard() {
 
       setCreateEmail("");
       setCreatePassword("");
-      setCreateRole("students_only");
+      setCreateRole("member");
+      setCreateAccessScopes([]);
       setCreateAssignedTeachers("");
       setMessage("New user added successfully.");
     } catch (createError) {
@@ -333,6 +383,11 @@ export function AccessManagementCard() {
           delete next[deleteTargetUser.userId];
           return next;
         });
+        setSelectedScopesByUser((prev) => {
+          const next = { ...prev };
+          delete next[deleteTargetUser.userId];
+          return next;
+        });
         setSelectedTeachersByUser((prev) => {
           const next = { ...prev };
           delete next[deleteTargetUser.userId];
@@ -343,13 +398,17 @@ export function AccessManagementCard() {
         setRecords((prev) =>
           prev.map((item) =>
             item.userId === deleteTargetUser.userId
-              ? { ...item, role: null, assignedTeachers: [] }
+              ? { ...item, role: null, accessScopes: [], assignedTeachers: [] }
               : item,
           ),
         );
         setSelectedRoleByUser((prev) => ({
           ...prev,
-          [deleteTargetUser.userId]: "students_only",
+          [deleteTargetUser.userId]: "member",
+        }));
+        setSelectedScopesByUser((prev) => ({
+          ...prev,
+          [deleteTargetUser.userId]: [],
         }));
         setSelectedTeachersByUser((prev) => ({
           ...prev,
@@ -394,6 +453,7 @@ export function AccessManagementCard() {
       item.email.toLowerCase().includes(normalized) ||
       item.userId.toLowerCase().includes(normalized) ||
       (item.role ?? "").toLowerCase().includes(normalized) ||
+      (item.accessScopes ?? []).some((scope) => scopeLabel(scope).toLowerCase().includes(normalized)) ||
       (item.assignedTeachers ?? []).some((teacher) => teacher.toLowerCase().includes(normalized))
     );
   });
@@ -480,7 +540,7 @@ export function AccessManagementCard() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
             <div className="space-y-2">
               <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Access Role</label>
               <Select value={createRole} onValueChange={(value: UserAccessRole) => setCreateRole(value)}>
@@ -506,46 +566,78 @@ export function AccessManagementCard() {
                 </SelectContent>
               </Select>
             </div>
-            {createRole === "students_only" ? (
+            {createRole === "member" ? (
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Assign Teachers</label>
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Access Permissions</label>
                 <div className="flex flex-wrap gap-2">
-                  {teacherOptions.length > 0 ? (
-                    teacherOptions.map((teacher) => {
-                      const isSelected = createAssignedTeachers.split(",").map(t => t.trim()).filter(Boolean).includes(teacher);
-                      return (
-                        <button
-                          key={teacher}
-                          type="button"
-                          onClick={() => {
-                            const current = createAssignedTeachers.split(",").map(t => t.trim()).filter(Boolean);
-                            if (isSelected) {
-                              setCreateAssignedTeachers(current.filter(t => t !== teacher).join(", "));
-                            } else {
-                              setCreateAssignedTeachers([...current, teacher].join(", "));
-                            }
-                          }}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
-                            isSelected
-                              ? "bg-cyan-500 text-white"
-                              : "border border-dashed border-cyan-300 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:border-cyan-700/50 dark:bg-cyan-950/30 dark:text-cyan-300 dark:hover:bg-cyan-900/50"
-                          )}
-                        >
-                          {isSelected && <ShieldCheck className="h-3.5 w-3.5" />}
-                          {teacher}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-slate-500 italic dark:text-slate-400">
-                      No teachers available. Add teachers to students first.
-                    </p>
-                  )}
+                  {ACCESS_OPTIONS.map((option) => {
+                    const Icon = option.icon;
+                    const isSelected = createAccessScopes.includes(option.value);
+
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setCreateAccessScopes((prev) => toggleAccessScope(prev, option.value))}
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
+                          isSelected
+                            ? "border-sky-500 bg-sky-500 text-white"
+                            : "border-slate-300 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-500/50 dark:hover:bg-sky-950/30",
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {option.label}
+                      </button>
+                    );
+                  })}
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Select one or more teachers
-                </p>
+                {createAccessScopes.includes("students") ? (
+                  <div className="space-y-2 pt-2">
+                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Assign Teachers</label>
+                    <div className="flex flex-wrap gap-2">
+                      {teacherOptions.length > 0 ? (
+                        teacherOptions.map((teacher) => {
+                          const isSelected = createAssignedTeachers.split(",").map((t) => t.trim()).filter(Boolean).includes(teacher);
+                          return (
+                            <button
+                              key={teacher}
+                              type="button"
+                              onClick={() => {
+                                const current = createAssignedTeachers.split(",").map((t) => t.trim()).filter(Boolean);
+                                if (isSelected) {
+                                  setCreateAssignedTeachers(current.filter((t) => t !== teacher).join(", "));
+                                } else {
+                                  setCreateAssignedTeachers([...current, teacher].join(", "));
+                                }
+                              }}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
+                                isSelected
+                                  ? "bg-cyan-500 text-white"
+                                  : "border border-dashed border-cyan-300 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:border-cyan-700/50 dark:bg-cyan-950/30 dark:text-cyan-300 dark:hover:bg-cyan-900/50",
+                              )}
+                            >
+                              {isSelected && <ShieldCheck className="h-3.5 w-3.5" />}
+                              {teacher}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className="text-xs text-slate-500 italic dark:text-slate-400">
+                          No teachers available. Add teachers to students first.
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Select one or more teachers for student visibility
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Select one or more permissions for this user.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="flex items-end">
@@ -561,7 +653,7 @@ export function AccessManagementCard() {
           <Input
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search by email, user id, role, or teacher"
+            placeholder="Search by email, user id, access, or teacher"
             className="max-w-md border-slate-300 dark:border-slate-600"
           />
           {message ? (
@@ -575,12 +667,13 @@ export function AccessManagementCard() {
             Loading access records...
           </div>
         ) : (
-          <Table className="min-w-[760px]">
+          <Table className="min-w-[980px]">
             <TableHeader>
               <TableRow className="border-slate-200 dark:border-slate-700">
                 <TableHead className="text-slate-600 dark:text-slate-400">User</TableHead>
                 <TableHead className="text-slate-600 dark:text-slate-400">Current Access</TableHead>
-                <TableHead className="text-slate-600 dark:text-slate-400">Change Access</TableHead>
+                <TableHead className="text-slate-600 dark:text-slate-400">Role</TableHead>
+                <TableHead className="text-slate-600 dark:text-slate-400">App Access</TableHead>
                 <TableHead className="text-slate-600 dark:text-slate-400">Teacher Scope</TableHead>
                 <TableHead className="text-right text-slate-600 dark:text-slate-400">Actions</TableHead>
               </TableRow>
@@ -588,16 +681,22 @@ export function AccessManagementCard() {
             <TableBody>
               {filteredRecords.length ? (
                 filteredRecords.map((item) => {
-                  const selectedRole = selectedRoleByUser[item.userId] ?? "students_only";
+                  const selectedRole = selectedRoleByUser[item.userId] ?? "member";
+                  const selectedScopes = normalizeAccessScopes(selectedScopesByUser[item.userId]);
                   const selectedTeachersRaw = selectedTeachersByUser[item.userId] ?? "";
                   const isSaving = savingUserId === item.userId;
+                  const originalScopes = normalizeAccessScopes(item.accessScopes);
                   const originalTeachers = parseTeacherNames(formatTeacherNames(item.assignedTeachers));
                   const selectedTeachers = parseTeacherNames(selectedTeachersRaw);
-                  const hasRoleChanged = selectedRole !== (item.role ?? "students_only");
+                  const hasRoleChanged = selectedRole !== (item.role ?? "member");
+                  const hasScopesChanged =
+                    (selectedRole === "admin" ? [] : selectedScopes).join("|") !==
+                    (item.role === "admin" ? [] : originalScopes).join("|");
                   const hasTeachersChanged =
-                    selectedRole === "students_only" &&
+                    selectedRole === "member" &&
+                    selectedScopes.includes("students") &&
                     originalTeachers.join("|") !== selectedTeachers.join("|");
-                  const hasChanged = hasRoleChanged || hasTeachersChanged;
+                  const hasChanged = hasRoleChanged || hasScopesChanged || hasTeachersChanged;
 
                   return (
                     <TableRow key={item.userId} className="border-slate-200 dark:border-slate-700">
@@ -616,21 +715,38 @@ export function AccessManagementCard() {
                       </TableCell>
                       <TableCell>
                         {item.role ? (
-                          <Badge
-                            variant="outline"
-                            className={
-                              item.role === "admin"
-                                ? "inline-flex items-center gap-1.5 rounded-full border-emerald-500/45 bg-emerald-500/15 px-2.5 py-1 font-medium text-emerald-700 dark:text-emerald-300"
-                                : "inline-flex items-center gap-1.5 rounded-full border-sky-500/45 bg-sky-500/15 px-2.5 py-1 font-medium text-sky-700 dark:text-sky-300"
-                            }
-                          >
-                            {item.role === "admin" ? (
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                            ) : (
-                              <Users className="h-3.5 w-3.5" />
-                            )}
-                            {roleLabel(item.role)}
-                          </Badge>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge
+                              variant="outline"
+                              className={
+                                item.role === "admin"
+                                  ? "inline-flex items-center gap-1.5 rounded-full border-emerald-500/45 bg-emerald-500/15 px-2.5 py-1 font-medium text-emerald-700 dark:text-emerald-300"
+                                  : "inline-flex items-center gap-1.5 rounded-full border-slate-400/45 bg-slate-500/10 px-2.5 py-1 font-medium text-slate-700 dark:text-slate-200"
+                              }
+                            >
+                              {item.role === "admin" ? (
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                              ) : (
+                                <UserCog className="h-3.5 w-3.5" />
+                              )}
+                              {roleLabel(item.role)}
+                            </Badge>
+                            {item.role === "member"
+                              ? item.accessScopes.map((scope) => {
+                                  const Icon = scope === "students" ? Users : ClipboardList;
+                                  return (
+                                    <Badge
+                                      key={scope}
+                                      variant="outline"
+                                      className="inline-flex items-center gap-1.5 rounded-full border-sky-500/45 bg-sky-500/15 px-2.5 py-1 font-medium text-sky-700 dark:text-sky-300"
+                                    >
+                                      <Icon className="h-3.5 w-3.5" />
+                                      {scopeLabel(scope)}
+                                    </Badge>
+                                  );
+                                })
+                              : null}
+                          </div>
                         ) : (
                           <Badge
                             variant="outline"
@@ -644,9 +760,12 @@ export function AccessManagementCard() {
                       <TableCell>
                         <Select
                           value={selectedRole}
-                          onValueChange={(value: UserAccessRole) =>
-                            setSelectedRoleByUser((prev) => ({ ...prev, [item.userId]: value }))
-                          }
+                          onValueChange={(value: UserAccessRole) => {
+                            setSelectedRoleByUser((prev) => ({ ...prev, [item.userId]: value }));
+                            if (value === "admin") {
+                              setSelectedScopesByUser((prev) => ({ ...prev, [item.userId]: [] }));
+                            }
+                          }}
                         >
                           <SelectTrigger className="w-[190px]">
                             <SelectValue />
@@ -661,7 +780,41 @@ export function AccessManagementCard() {
                         </Select>
                       </TableCell>
                       <TableCell>
-                        {selectedRole === "students_only" ? (
+                        {selectedRole === "member" ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {ACCESS_OPTIONS.map((option) => {
+                              const Icon = option.icon;
+                              const isSelected = selectedScopes.includes(option.value);
+
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedScopesByUser((prev) => ({
+                                      ...prev,
+                                      [item.userId]: toggleAccessScope(normalizeAccessScopes(prev[item.userId]), option.value),
+                                    }))
+                                  }
+                                  className={cn(
+                                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all",
+                                    isSelected
+                                      ? "border-sky-500 bg-sky-500 text-white"
+                                      : "border-slate-300 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-500/50 dark:hover:bg-sky-950/30",
+                                  )}
+                                >
+                                  <Icon className="h-3.5 w-3.5" />
+                                  {option.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">Managed by admin role</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {selectedRole === "member" && selectedScopes.includes("students") ? (
                           teacherOptions.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
                               {teacherOptions.map((teacher) => {
@@ -731,7 +884,7 @@ export function AccessManagementCard() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-slate-500 dark:text-slate-400">
+                  <TableCell colSpan={6} className="text-center text-sm text-slate-500 dark:text-slate-400">
                     No users matched your search.
                   </TableCell>
                 </TableRow>

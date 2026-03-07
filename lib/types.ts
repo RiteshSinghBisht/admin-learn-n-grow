@@ -3,8 +3,10 @@ export type StudentBatch = "morning" | "evening";
 export type TransactionType = "income" | "expense";
 export type PaymentStatus = "paid" | "pending";
 export type AttendanceStatus = "present" | "absent";
-export type UserAccessRole = "admin" | "students_only";
+export type UserAccessRole = "admin" | "member";
+export type AppAccessScope = "students" | "tasks";
 export type UserDeleteMode = "access" | "user";
+export type TaskStatus = "pending" | "in_progress" | "completed";
 
 export interface Student {
   id: string;
@@ -40,6 +42,32 @@ export interface AttendanceRecord {
   note?: string;
 }
 
+export interface TaskItem {
+  id: string;
+  title: string;
+  description?: string;
+  eventDate: string;
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  ownerUserId?: string;
+}
+
+export interface TaskFormInput {
+  title: string;
+  description?: string;
+  eventDate: string;
+  status?: TaskStatus;
+}
+
+export interface AnnouncementItem {
+  id: string;
+  title: string;
+  message: string;
+  date: string;
+  createdAt: string;
+}
+
 export interface BusinessProfile {
   businessName: string;
   ownerName: string;
@@ -51,6 +79,7 @@ export interface UserAccess {
   userId: string;
   email: string;
   role: UserAccessRole | null;
+  accessScopes: AppAccessScope[];
   assignedTeachers?: string[];
   createdAt: string;
 }
@@ -59,6 +88,7 @@ export interface CreateUserAccessInput {
   email: string;
   password: string;
   role: UserAccessRole;
+  accessScopes?: AppAccessScope[];
   assignedTeachers?: string[];
 }
 

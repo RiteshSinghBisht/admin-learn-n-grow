@@ -105,7 +105,7 @@ cross join weekdays w;
 
 -- Dummy access roles for existing Auth users:
 -- - first created user -> admin
--- - remaining users -> students_only
+-- - remaining users -> member with student access
 with ranked_users as (
   select
     u.id,
@@ -113,15 +113,17 @@ with ranked_users as (
   from auth.users u
   where u.deleted_at is null
 )
-insert into public.app_user_roles (user_id, role)
+insert into public.app_user_roles (user_id, role, access_scopes)
 select
   r.id,
-  case when r.position = 1 then 'admin' else 'students_only' end
+  case when r.position = 1 then 'admin' else 'member' end,
+  case when r.position = 1 then '{}'::text[] else array['students']::text[] end
 from ranked_users r
 on conflict (user_id)
 do update
 set
   role = excluded.role,
+  access_scopes = excluded.access_scopes,
   updated_at = now();
 
 commit;

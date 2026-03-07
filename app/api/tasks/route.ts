@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { hasAccessScope } from "@/lib/access-control";
 import { authenticateRequest } from "@/lib/server-access";
 
 const corsHeaders = {
@@ -16,31 +17,33 @@ function buildResponse(body: unknown, init?: ResponseInit) {
   return response;
 }
 
-async function requireAuthenticatedAccess(request: Request) {
-  const authCheck = await authenticateRequest(request);
-  if (!authCheck.ok || !authCheck.access || !authCheck.access.role) {
-    return {
-      ok: false,
-      status: authCheck.status,
-      message: authCheck.message || "Unauthorized.",
-      access: null,
-    };
-  }
-
-  return authCheck;
+function normalizeDateValue(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-async function requireAdminAccess(request: Request) {
-  const authCheck = await requireAuthenticatedAccess(request);
+function normalizeStatus(value: unknown) {
+  if (value === "completed") {
+    return "completed";
+  }
+
+  if (value === "in_progress" || value === "inProgress" || value === "in progress") {
+    return "in_progress";
+  }
+
+  return "pending";
+}
+
+async function requireTaskAccess(request: Request) {
+  const authCheck = await authenticateRequest(request);
   if (!authCheck.ok || !authCheck.access) {
     return authCheck;
   }
 
-  if (!authCheck.access.isAdmin) {
+  if (!authCheck.access.isAdmin && !hasAccessScope(authCheck.access.accessScopes, "tasks")) {
     return {
       ok: false,
       status: 403,
-      message: "Only admins can manage announcements.",
+      message: "Task access is required.",
       access: null,
     };
   }
@@ -50,19 +53,21 @@ async function requireAdminAccess(request: Request) {
 
 export async function GET(request: NextRequest) {
   try {
-    const authCheck = await requireAuthenticatedAccess(request);
+    const authCheck = await requireTaskAccess(request);
     if (!authCheck.ok || !authCheck.access) {
       return buildResponse({ error: authCheck.message }, { status: authCheck.status });
     }
 
     const { data, error } = await authCheck.access.adminClient
-      .from("announcements")
+      .from("tasks")
       .select("*")
-      .order("date", { ascending: false });
+      .eq("owner_user_id", authCheck.access.userId)
+      .order("event_date", { ascending: true })
+      .order("created_at", { ascending: true });
 
     if (error) {
       return buildResponse(
-        { error: "Failed to fetch announcements", details: error.message },
+        { error: "Failed to fetch tasks", details: error.message },
         { status: 500 },
       );
     }
@@ -75,7 +80,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return buildResponse(
       {
-        error: "Failed to fetch announcements",
+        error: "Failed to fetch tasks",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
@@ -85,28 +90,33 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authCheck = await requireAdminAccess(request);
+    const authCheck = await requireTaskAccess(request);
     if (!authCheck.ok || !authCheck.access) {
       return buildResponse({ error: authCheck.message }, { status: authCheck.status });
     }
 
     const body = await request.json();
-    const { title, message, date } = body;
+    const title = String(body.title ?? "").trim();
+    const eventDate = normalizeDateValue(body.eventDate ?? body.event_date);
+    const description = String(body.description ?? "").trim();
+    const status = normalizeStatus(body.status);
 
-    if (!title || !message || !date) {
+    if (!title || !eventDate) {
       return buildResponse(
-        { error: "Missing required fields: title, message, date" },
+        { error: "Missing required fields: title, eventDate" },
         { status: 400 },
       );
     }
 
     const { data, error } = await authCheck.access.adminClient
-      .from("announcements")
+      .from("tasks")
       .insert([
         {
-          title: String(title).trim(),
-          message: String(message).trim(),
-          date: String(date).trim(),
+          title,
+          description: description || null,
+          event_date: eventDate,
+          status,
+          owner_user_id: authCheck.access.userId,
         },
       ])
       .select()
@@ -114,20 +124,20 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       return buildResponse(
-        { error: "Failed to create announcement", details: error.message },
+        { error: "Failed to create task", details: error.message },
         { status: 500 },
       );
     }
 
     return buildResponse({
       success: true,
-      message: "Announcement created successfully",
+      message: "Task created successfully",
       data,
     });
   } catch (error) {
     return buildResponse(
       {
-        error: "Failed to create announcement",
+        error: "Failed to create task",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
@@ -137,42 +147,50 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const authCheck = await requireAdminAccess(request);
+    const authCheck = await requireTaskAccess(request);
     if (!authCheck.ok || !authCheck.access) {
       return buildResponse({ error: authCheck.message }, { status: authCheck.status });
     }
 
     const body = await request.json();
-    const { id, title, message, date } = body;
+    const id = body.id;
 
     if (!id) {
       return buildResponse({ error: "Missing required field: id" }, { status: 400 });
     }
 
-    const updateData: { title?: string; message?: string; date?: string } = {};
+    const updateData: {
+      title?: string;
+      description?: string | null;
+      event_date?: string;
+      status?: "pending" | "in_progress" | "completed";
+    } = {};
 
-    if (title !== undefined) {
-      const nextTitle = String(title).trim();
-      if (!nextTitle) {
+    if (body.title !== undefined) {
+      const title = String(body.title).trim();
+      if (!title) {
         return buildResponse({ error: "Title cannot be empty" }, { status: 400 });
       }
-      updateData.title = nextTitle;
+
+      updateData.title = title;
     }
 
-    if (message !== undefined) {
-      const nextMessage = String(message).trim();
-      if (!nextMessage) {
-        return buildResponse({ error: "Message cannot be empty" }, { status: 400 });
-      }
-      updateData.message = nextMessage;
+    if (body.description !== undefined) {
+      const description = String(body.description ?? "").trim();
+      updateData.description = description || null;
     }
 
-    if (date !== undefined) {
-      const nextDate = String(date).trim();
-      if (!nextDate) {
-        return buildResponse({ error: "Date cannot be empty" }, { status: 400 });
+    if (body.eventDate !== undefined || body.event_date !== undefined) {
+      const eventDate = normalizeDateValue(body.eventDate ?? body.event_date);
+      if (!eventDate) {
+        return buildResponse({ error: "Event date cannot be empty" }, { status: 400 });
       }
-      updateData.date = nextDate;
+
+      updateData.event_date = eventDate;
+    }
+
+    if (body.status !== undefined) {
+      updateData.status = normalizeStatus(body.status);
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -180,32 +198,33 @@ export async function PATCH(request: NextRequest) {
     }
 
     const { data, error } = await authCheck.access.adminClient
-      .from("announcements")
+      .from("tasks")
       .update(updateData)
       .eq("id", id)
+      .eq("owner_user_id", authCheck.access.userId)
       .select()
       .maybeSingle();
 
     if (error) {
       return buildResponse(
-        { error: "Failed to update announcement", details: error.message },
+        { error: "Failed to update task", details: error.message },
         { status: 500 },
       );
     }
 
     if (!data) {
-      return buildResponse({ error: "Announcement not found." }, { status: 404 });
+      return buildResponse({ error: "Task not found." }, { status: 404 });
     }
 
     return buildResponse({
       success: true,
-      message: "Announcement updated successfully",
+      message: "Task updated successfully",
       data,
     });
   } catch (error) {
     return buildResponse(
       {
-        error: "Failed to update announcement",
+        error: "Failed to update task",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
@@ -215,7 +234,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const authCheck = await requireAdminAccess(request);
+    const authCheck = await requireTaskAccess(request);
     if (!authCheck.ok || !authCheck.access) {
       return buildResponse({ error: authCheck.message }, { status: authCheck.status });
     }
@@ -224,35 +243,36 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get("id");
 
     if (!id) {
-      return buildResponse({ error: "Missing announcement ID" }, { status: 400 });
+      return buildResponse({ error: "Missing task ID" }, { status: 400 });
     }
 
     const { data, error } = await authCheck.access.adminClient
-      .from("announcements")
+      .from("tasks")
       .delete()
       .eq("id", id)
+      .eq("owner_user_id", authCheck.access.userId)
       .select("id")
       .maybeSingle();
 
     if (error) {
       return buildResponse(
-        { error: "Failed to delete announcement", details: error.message },
+        { error: "Failed to delete task", details: error.message },
         { status: 500 },
       );
     }
 
     if (!data) {
-      return buildResponse({ error: "Announcement not found." }, { status: 404 });
+      return buildResponse({ error: "Task not found." }, { status: 404 });
     }
 
     return buildResponse({
       success: true,
-      message: "Announcement deleted successfully",
+      message: "Task deleted successfully",
     });
   } catch (error) {
     return buildResponse(
       {
-        error: "Failed to delete announcement",
+        error: "Failed to delete task",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },

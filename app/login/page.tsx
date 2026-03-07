@@ -13,7 +13,7 @@ import { getDefaultPathForRole } from "@/lib/access-control";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthEnabled, loading, roleLoading, user, role, signIn } = useAuth();
+  const { isAuthEnabled, loading, roleLoading, user, role, accessScopes, signIn } = useAuth();
 
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -29,8 +29,8 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace(getDefaultPathForRole(role));
-  }, [isAuthEnabled, loading, role, roleLoading, router, user]);
+    router.replace(getDefaultPathForRole(role, accessScopes));
+  }, [accessScopes, isAuthEnabled, loading, role, roleLoading, router, user]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

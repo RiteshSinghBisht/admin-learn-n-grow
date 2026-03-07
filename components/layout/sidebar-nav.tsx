@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ComponentType } from "react";
 import {
   Bot,
+  ClipboardList,
   ChevronsLeft,
   ChevronsRight,
   ShieldCheck,
@@ -25,6 +26,7 @@ import { Button } from "@/components/ui/button";
 
 const navIconMap: Record<string, ComponentType<{ className?: string }>> = {
   Dashboard: LayoutDashboard,
+  Tasks: ClipboardList,
   Finance: Wallet,
   Students: GraduationCap,
   "Access Management": ShieldCheck,
@@ -39,8 +41,8 @@ interface SidebarNavProps {
 
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const pathname = usePathname();
-  const { isAuthEnabled, role, user, signOut } = useAuth();
-  const visibleNavItems = filterNavItemsByRole(NAV_ITEMS, role, isAuthEnabled);
+  const { isAuthEnabled, role, accessScopes, user, signOut } = useAuth();
+  const visibleNavItems = filterNavItemsByRole(NAV_ITEMS, role, isAuthEnabled, accessScopes);
 
   return (
     <aside

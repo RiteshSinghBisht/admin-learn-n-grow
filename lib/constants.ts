@@ -15,6 +15,7 @@ export const MONTHS_TO_SHOW = 6;
 
 export const NAV_ITEMS = [
   { title: "Dashboard", href: "/" },
+  { title: "Tasks", href: "/tasks" },
   { title: "Finance", href: "/finance" },
   { title: "Students", href: "/students" },
   { title: "Access Management", href: "/access-management" },

@@ -1,16 +1,23 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
-import type { UserAccessRole } from "@/lib/types";
+import { normalizeAccessScopes } from "@/lib/access-control";
+import { authenticateRequest } from "@/lib/server-access";
+import type { AppAccessScope, UserAccessRole } from "@/lib/types";
+
+interface UserAccessRow {
+  user_id: string;
+  role: UserAccessRole | "students_only" | "teacher" | null;
+  access_scopes?: string[] | null;
+  assigned_teachers?: string[] | null;
+}
 
 interface CreateUserBody {
   email?: string;
   password?: string;
   role?: UserAccessRole;
+  accessScopes?: AppAccessScope[];
   assignedTeachers?: string[];
 }
-
-const ALLOWED_ROLES: UserAccessRole[] = ["admin", "students_only"];
 
 function normalizeTeacherNames(values: unknown) {
   const seen = new Set<string>();
@@ -22,14 +29,17 @@ function normalizeTeacherNames(values: unknown) {
     if (typeof value !== "string") {
       return;
     }
+
     const next = value.trim();
     if (!next) {
       return;
     }
+
     const key = next.toLowerCase();
     if (seen.has(key)) {
       return;
     }
+
     seen.add(key);
     normalized.push(next);
   });
@@ -37,67 +47,121 @@ function normalizeTeacherNames(values: unknown) {
   return normalized;
 }
 
-function getEnv() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !anonKey || !serviceRoleKey) {
-    throw new Error(
-      "Supabase server setup is incomplete. Add NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY.",
-    );
+function normalizeStoredRole(role: UserAccessRow["role"]): UserAccessRole | null {
+  if (role === "admin") {
+    return "admin";
   }
 
-  return { url, anonKey, serviceRoleKey };
+  if (role === "member" || role === "students_only" || role === "teacher") {
+    return "member";
+  }
+
+  return null;
 }
 
-function extractBearerToken(request: Request) {
-  const authorization = request.headers.get("authorization")?.trim() ?? "";
-  if (!authorization.toLowerCase().startsWith("bearer ")) {
-    return null;
+function normalizeStoredAccessScopes(row: UserAccessRow) {
+  if (row.role === "admin") {
+    return [];
   }
 
-  return authorization.slice(7).trim() || null;
+  const scopes = normalizeAccessScopes(row.access_scopes);
+  if (scopes.length > 0) {
+    return scopes;
+  }
+
+  if (row.role === "students_only" || row.role === "teacher") {
+    return ["students"] satisfies AppAccessScope[];
+  }
+
+  return [];
 }
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function validateAccessConfig(
+  role: UserAccessRole | undefined,
+  accessScopes: AppAccessScope[],
+  assignedTeachers: string[],
+) {
+  if (!role || (role !== "admin" && role !== "member")) {
+    return "Invalid role selected.";
+  }
+
+  if (role === "member" && accessScopes.length === 0) {
+    return "Select at least one access permission.";
+  }
+
+  if (role === "member" && accessScopes.includes("students") && assignedTeachers.length === 0) {
+    return "Assign at least one teacher for Student Access.";
+  }
+
+  return null;
+}
+
+export async function GET(request: Request) {
+  try {
+    const authCheck = await authenticateRequest(request);
+    if (!authCheck.ok || !authCheck.access) {
+      return NextResponse.json({ message: authCheck.message }, { status: authCheck.status });
+    }
+
+    if (!authCheck.access.isAdmin) {
+      return NextResponse.json({ message: "Only admins can view user access." }, { status: 403 });
+    }
+
+    const [{ data: usersPage, error: usersError }, { data: roles, error: rolesError }] =
+      await Promise.all([
+        authCheck.access.adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+        authCheck.access.adminClient
+          .from("app_user_roles")
+          .select("user_id, role, access_scopes, assigned_teachers"),
+      ]);
+
+    if (usersError) {
+      return NextResponse.json({ message: usersError.message }, { status: 400 });
+    }
+
+    if (rolesError) {
+      return NextResponse.json({ message: rolesError.message }, { status: 400 });
+    }
+
+    const roleByUserId = new Map<string, UserAccessRow>();
+    ((roles ?? []) as UserAccessRow[]).forEach((entry) => {
+      roleByUserId.set(entry.user_id, entry);
+    });
+
+    const data = (usersPage.users ?? [])
+      .filter((user) => !user.deleted_at)
+      .map((user) => {
+        const accessRow = roleByUserId.get(user.id);
+        return {
+          user_id: user.id,
+          email: user.email ?? "",
+          role: normalizeStoredRole(accessRow?.role ?? null),
+          access_scopes: accessRow ? normalizeStoredAccessScopes(accessRow) : [],
+          assigned_teachers: normalizeTeacherNames(accessRow?.assigned_teachers),
+          created_at: user.created_at ?? new Date().toISOString(),
+        };
+      });
+
+    return NextResponse.json({ data });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unexpected server error while loading users.";
+    return NextResponse.json({ message }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+    const authCheck = await authenticateRequest(request);
+    if (!authCheck.ok || !authCheck.access) {
+      return NextResponse.json({ message: authCheck.message }, { status: authCheck.status });
     }
 
-    const { url, anonKey, serviceRoleKey } = getEnv();
-    const verifyClient = createClient(url, anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const adminClient = createClient(url, serviceRoleKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
-    const {
-      data: { user: requester },
-      error: requesterError,
-    } = await verifyClient.auth.getUser(token);
-    if (requesterError || !requester) {
-      return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
-    }
-
-    const { data: requesterRole, error: requesterRoleError } = await adminClient
-      .from("app_user_roles")
-      .select("role")
-      .eq("user_id", requester.id)
-      .maybeSingle();
-
-    if (requesterRoleError) {
-      return NextResponse.json({ message: requesterRoleError.message }, { status: 400 });
-    }
-
-    if (!requesterRole || requesterRole.role !== "admin") {
+    if (!authCheck.access.isAdmin) {
       return NextResponse.json({ message: "Only admins can add users." }, { status: 403 });
     }
 
@@ -105,7 +169,11 @@ export async function POST(request: Request) {
     const email = body.email?.trim().toLowerCase() ?? "";
     const password = body.password ?? "";
     const role = body.role;
-    const assignedTeachers = normalizeTeacherNames(body.assignedTeachers);
+    const accessScopes = role === "admin" ? [] : normalizeAccessScopes(body.accessScopes);
+    const assignedTeachers =
+      role === "admin" || !accessScopes.includes("students")
+        ? []
+        : normalizeTeacherNames(body.assignedTeachers);
 
     if (!email || !isValidEmail(email)) {
       return NextResponse.json({ message: "Enter a valid email." }, { status: 400 });
@@ -118,22 +186,17 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!role || !ALLOWED_ROLES.includes(role)) {
-      return NextResponse.json({ message: "Invalid role selected." }, { status: 400 });
+    const validationError = validateAccessConfig(role, accessScopes, assignedTeachers);
+    if (validationError) {
+      return NextResponse.json({ message: validationError }, { status: 400 });
     }
 
-    if (role === "students_only" && assignedTeachers.length === 0) {
-      return NextResponse.json(
-        { message: "Assign at least one teacher for Student Only access." },
-        { status: 400 },
-      );
-    }
-
-    const { data: created, error: createUserError } = await adminClient.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    });
+    const { data: created, error: createUserError } =
+      await authCheck.access.adminClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
 
     if (createUserError || !created.user) {
       return NextResponse.json(
@@ -142,11 +205,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const { error: roleUpsertError } = await adminClient.from("app_user_roles").upsert(
+    const { error: roleUpsertError } = await authCheck.access.adminClient.from("app_user_roles").upsert(
       {
         user_id: created.user.id,
         role,
-        assigned_teachers: role === "students_only" ? assignedTeachers : [],
+        access_scopes: accessScopes,
+        assigned_teachers: assignedTeachers,
       },
       { onConflict: "user_id" },
     );
@@ -159,7 +223,8 @@ export async function POST(request: Request) {
       userId: created.user.id,
       email: created.user.email ?? email,
       role,
-      assignedTeachers: role === "students_only" ? assignedTeachers : [],
+      accessScopes,
+      assignedTeachers,
       createdAt: created.user.created_at ?? new Date().toISOString(),
     });
   } catch (error) {

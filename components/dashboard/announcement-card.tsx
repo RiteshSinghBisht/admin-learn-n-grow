@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { ArrowUpRight, Calendar as CalendarIcon, MessageSquare, Edit, Trash2, CheckCircle, XCircle } from "lucide-react";
 
+import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +18,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { requestJson } from "@/lib/api-client";
+import { parseLocalDate, toLocalDateString } from "@/lib/date";
 import { cn } from "@/lib/utils";
 
 // Toast types
@@ -40,32 +43,8 @@ interface AnnouncementCardProps {
   inverted?: boolean;
 }
 
-function toLocalDateString(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function parseAnnouncementDate(dateValue: string) {
-  const [year, month, day] = dateValue.split("-").map(Number);
-
-  if (
-    Number.isInteger(year) &&
-    Number.isInteger(month) &&
-    Number.isInteger(day) &&
-    month >= 1 &&
-    month <= 12 &&
-    day >= 1 &&
-    day <= 31
-  ) {
-    return new Date(year, month - 1, day);
-  }
-
-  return new Date(dateValue);
-}
-
 export function AnnouncementCard({ className, inverted = true }: AnnouncementCardProps) {
+  const { role, session } = useAuth();
   const [open, setOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -96,20 +75,14 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     if (!confirmDelete) return;
 
     try {
-      const response = await fetch(`/api/announcements?id=${confirmDelete.id}`, {
-        method: 'DELETE'
-      });
-      const result = await response.json();
-
-      if (result.success) {
-        showToast('Announcement deleted successfully!', 'success');
-        fetchAnnouncements();
-      } else {
-        showToast('Failed to delete: ' + result.error, 'error');
-      }
+      await requestJson(`/api/announcements?id=${confirmDelete.id}`, {
+        method: "DELETE",
+      }, accessToken);
+      showToast("Announcement deleted successfully!", "success");
+      fetchAnnouncements();
     } catch (error) {
-      console.error('Error:', error);
-      showToast('Failed to delete', 'error');
+      console.error("Error:", error);
+      showToast(error instanceof Error ? error.message : "Failed to delete", "error");
     }
     setConfirmDelete(null);
   };
@@ -119,18 +92,20 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
   const [message, setMessage] = useState("");
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const accessToken = session?.access_token ?? null;
+
+  if (role !== "admin") {
+    return null;
+  }
 
   // Fetch announcements when dialog opens
   const fetchAnnouncements = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/announcements');
-      const result = await response.json();
-      if (result.success) {
-        setAnnouncements(result.data || []);
-      }
+      const result = await requestJson<Announcement[]>("/api/announcements", undefined, accessToken);
+      setAnnouncements(result.data || []);
     } catch (error) {
-      console.error('Error fetching announcements:', error);
+      console.error("Error fetching announcements:", error);
     }
     setLoading(false);
   };
@@ -139,7 +114,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     if (open) {
       fetchAnnouncements();
     }
-  }, [open]);
+  }, [accessToken, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,28 +133,22 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     try {
       const formattedDate = toLocalDateString(date);
 
-      const response = await fetch('/api/announcements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await requestJson("/api/announcements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
           message,
           date: formattedDate
         })
-      });
+      }, accessToken);
 
-      const result = await response.json();
-
-      if (result.success) {
-        showToast('Announcement created successfully!', 'success');
-        resetForm();
-        fetchAnnouncements();
-      } else {
-        showToast('Failed: ' + result.error, 'error');
-      }
+      showToast("Announcement created successfully!", "success");
+      resetForm();
+      fetchAnnouncements();
     } catch (error) {
-      console.error('Error:', error);
-      showToast('Failed to create announcement', 'error');
+      console.error("Error:", error);
+      showToast(error instanceof Error ? error.message : "Failed to create announcement", "error");
     } finally {
       setSubmitting(false);
     }
@@ -188,7 +157,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
   const handleEdit = (announcement: Announcement) => {
     setTitle(announcement.title);
     setMessage(announcement.message);
-    setDate(parseAnnouncementDate(announcement.date));
+    setDate(parseLocalDate(announcement.date));
     setEditingId(announcement.id);
   };
 
@@ -209,31 +178,23 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
     try {
       const formattedDate = toLocalDateString(date);
 
-      // Delete old and create new (since we don't have update endpoint)
-      await fetch(`/api/announcements?id=${editingId}`, { method: 'DELETE' });
-
-      const response = await fetch('/api/announcements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await requestJson("/api/announcements", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          id: editingId,
           title,
           message,
           date: formattedDate
         })
-      });
+      }, accessToken);
 
-      const result = await response.json();
-
-      if (result.success) {
-        showToast('Announcement updated successfully!', 'success');
-        resetForm();
-        fetchAnnouncements();
-      } else {
-        showToast('Failed: ' + result.error, 'error');
-      }
+      showToast("Announcement updated successfully!", "success");
+      resetForm();
+      fetchAnnouncements();
     } catch (error) {
-      console.error('Error:', error);
-      showToast('Failed to update', 'error');
+      console.error("Error:", error);
+      showToast(error instanceof Error ? error.message : "Failed to update", "error");
     } finally {
       setSubmitting(false);
     }
@@ -328,7 +289,7 @@ export function AnnouncementCard({ className, inverted = true }: AnnouncementCar
                   <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{announcement.title}</p>
                   <p className="line-clamp-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{announcement.message}</p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {parseAnnouncementDate(announcement.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {parseLocalDate(announcement.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                   </p>
                 </div>
                 <div className="ml-2 flex gap-1">

@@ -1,30 +1,42 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { UserDeleteMode } from "@/lib/types";
+import { normalizeAccessScopes } from "@/lib/access-control";
+import { authenticateRequest } from "@/lib/server-access";
+import type { AppAccessScope, UserAccessRole, UserDeleteMode } from "@/lib/types";
 
-function getEnv() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !anonKey || !serviceRoleKey) {
-    throw new Error(
-      "Supabase server setup is incomplete. Add NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY.",
-    );
-  }
-
-  return { url, anonKey, serviceRoleKey };
+interface UpdateUserAccessBody {
+  role?: UserAccessRole;
+  accessScopes?: AppAccessScope[];
+  assignedTeachers?: string[];
 }
 
-function extractBearerToken(request: Request) {
-  const authorization = request.headers.get("authorization")?.trim() ?? "";
-  if (!authorization.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
+function normalizeTeacherNames(values: unknown) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
 
-  return authorization.slice(7).trim() || null;
+  const source = Array.isArray(values) ? values : [];
+
+  source.forEach((value) => {
+    if (typeof value !== "string") {
+      return;
+    }
+
+    const next = value.trim();
+    if (!next) {
+      return;
+    }
+
+    const key = next.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    normalized.push(next);
+  });
+
+  return normalized;
 }
 
 function parseMode(request: Request): UserDeleteMode | null {
@@ -34,74 +46,35 @@ function parseMode(request: Request): UserDeleteMode | null {
   if (!mode || mode === "access") {
     return "access";
   }
+
   if (mode === "user") {
     return "user";
   }
+
   return null;
 }
 
-async function ensureRequesterIsAdmin(token: string) {
-  const { url, anonKey, serviceRoleKey } = getEnv();
-  const verifyClient = createClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const adminClient = createClient(url, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  }) as SupabaseClient;
-
-  const {
-    data: { user: requester },
-    error: requesterError,
-  } = await verifyClient.auth.getUser(token);
-  if (requesterError || !requester) {
-    return {
-      ok: false as const,
-      status: 401,
-      message: "Unauthorized.",
-      requesterId: null,
-      adminClient,
-    };
+function validateAccessConfig(
+  role: UserAccessRole | undefined,
+  accessScopes: AppAccessScope[],
+  assignedTeachers: string[],
+) {
+  if (!role || (role !== "admin" && role !== "member")) {
+    return "Invalid role selected.";
   }
 
-  const { data: requesterRole, error: requesterRoleError } = await adminClient
-    .from("app_user_roles")
-    .select("role")
-    .eq("user_id", requester.id)
-    .maybeSingle();
-
-  if (requesterRoleError) {
-    return {
-      ok: false as const,
-      status: 400,
-      message: requesterRoleError.message,
-      requesterId: requester.id,
-      adminClient,
-    };
+  if (role === "member" && accessScopes.length === 0) {
+    return "Select at least one access permission.";
   }
 
-  if (!requesterRole || requesterRole.role !== "admin") {
-    return {
-      ok: false as const,
-      status: 403,
-      message: "Only admins can manage user access.",
-      requesterId: requester.id,
-      adminClient,
-    };
+  if (role === "member" && accessScopes.includes("students") && assignedTeachers.length === 0) {
+    return "Assign at least one teacher for Student Access.";
   }
 
-  return {
-    ok: true as const,
-    status: 200,
-    message: "",
-    requesterId: requester.id,
-    adminClient,
-  };
+  return null;
 }
 
-async function ensureNotLastAdmin(
-  adminClient: SupabaseClient,
-  targetUserId: string,
-) {
+async function ensureNotLastAdmin(adminClient: SupabaseClient, targetUserId: string) {
   const { data: targetRole } = await adminClient
     .from("app_user_roles")
     .select("role")
@@ -131,14 +104,99 @@ async function ensureNotLastAdmin(
   return { ok: true as const, message: "" };
 }
 
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ userId: string }> },
+) {
+  try {
+    const authCheck = await authenticateRequest(request);
+    if (!authCheck.ok || !authCheck.access) {
+      return NextResponse.json({ message: authCheck.message }, { status: authCheck.status });
+    }
+
+    if (!authCheck.access.isAdmin) {
+      return NextResponse.json({ message: "Only admins can manage user access." }, { status: 403 });
+    }
+
+    const resolvedParams = await params;
+    const targetUserId = resolvedParams.userId?.trim();
+    if (!targetUserId) {
+      return NextResponse.json({ message: "User ID is required." }, { status: 400 });
+    }
+
+    const body = (await request.json()) as UpdateUserAccessBody;
+    const role = body.role;
+    const accessScopes = role === "admin" ? [] : normalizeAccessScopes(body.accessScopes);
+    const assignedTeachers =
+      role === "admin" || !accessScopes.includes("students")
+        ? []
+        : normalizeTeacherNames(body.assignedTeachers);
+
+    const validationError = validateAccessConfig(role, accessScopes, assignedTeachers);
+    if (validationError) {
+      return NextResponse.json({ message: validationError }, { status: 400 });
+    }
+
+    if (authCheck.access.userId === targetUserId && role !== "admin") {
+      return NextResponse.json(
+        { message: "You cannot remove your own admin access." },
+        { status: 400 },
+      );
+    }
+
+    const adminSafety = await ensureNotLastAdmin(authCheck.access.adminClient, targetUserId);
+    if (!adminSafety.ok && role !== "admin") {
+      return NextResponse.json({ message: adminSafety.message }, { status: 400 });
+    }
+
+    const { data: targetUser, error: getUserError } =
+      await authCheck.access.adminClient.auth.admin.getUserById(targetUserId);
+
+    if (getUserError || !targetUser.user || targetUser.user.deleted_at) {
+      return NextResponse.json({ message: "User not found." }, { status: 404 });
+    }
+
+    const { error: roleUpsertError } = await authCheck.access.adminClient.from("app_user_roles").upsert(
+      {
+        user_id: targetUserId,
+        role,
+        access_scopes: accessScopes,
+        assigned_teachers: assignedTeachers,
+      },
+      { onConflict: "user_id" },
+    );
+
+    if (roleUpsertError) {
+      return NextResponse.json({ message: roleUpsertError.message }, { status: 400 });
+    }
+
+    return NextResponse.json({
+      userId: targetUserId,
+      email: targetUser.user.email ?? "",
+      role,
+      accessScopes,
+      assignedTeachers,
+      createdAt: targetUser.user.created_at ?? new Date().toISOString(),
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unexpected server error while updating access.";
+    return NextResponse.json({ message }, { status: 500 });
+  }
+}
+
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const token = extractBearerToken(request);
-    if (!token) {
-      return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+    const authCheck = await authenticateRequest(request);
+    if (!authCheck.ok || !authCheck.access) {
+      return NextResponse.json({ message: authCheck.message }, { status: authCheck.status });
+    }
+
+    if (!authCheck.access.isAdmin) {
+      return NextResponse.json({ message: "Only admins can manage user access." }, { status: 403 });
     }
 
     const mode = parseMode(request);
@@ -155,25 +213,20 @@ export async function DELETE(
       return NextResponse.json({ message: "User ID is required." }, { status: 400 });
     }
 
-    const authCheck = await ensureRequesterIsAdmin(token);
-    if (!authCheck.ok) {
-      return NextResponse.json({ message: authCheck.message }, { status: authCheck.status });
-    }
-
-    if (authCheck.requesterId === targetUserId) {
+    if (authCheck.access.userId === targetUserId) {
       return NextResponse.json(
         { message: "You cannot delete your own account or access." },
         { status: 400 },
       );
     }
 
-    const adminSafety = await ensureNotLastAdmin(authCheck.adminClient, targetUserId);
+    const adminSafety = await ensureNotLastAdmin(authCheck.access.adminClient, targetUserId);
     if (!adminSafety.ok) {
       return NextResponse.json({ message: adminSafety.message }, { status: 400 });
     }
 
     if (mode === "access") {
-      const { error } = await authCheck.adminClient
+      const { error } = await authCheck.access.adminClient
         .from("app_user_roles")
         .delete()
         .eq("user_id", targetUserId);
@@ -186,7 +239,7 @@ export async function DELETE(
     }
 
     const { error: deleteUserError } =
-      await authCheck.adminClient.auth.admin.deleteUser(targetUserId);
+      await authCheck.access.adminClient.auth.admin.deleteUser(targetUserId);
 
     if (deleteUserError) {
       return NextResponse.json({ message: deleteUserError.message }, { status: 400 });

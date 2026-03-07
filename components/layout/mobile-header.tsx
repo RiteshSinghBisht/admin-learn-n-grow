@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ComponentType } from "react";
 import {
   Bot,
+  ClipboardList,
   GraduationCap,
   LayoutDashboard,
   LogOut,
@@ -31,6 +32,7 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 const navIconMap: Record<string, ComponentType<{ className?: string }>> = {
   Dashboard: LayoutDashboard,
+  Tasks: ClipboardList,
   Finance: Wallet,
   Students: GraduationCap,
   "Access Management": ShieldCheck,
@@ -40,8 +42,8 @@ const navIconMap: Record<string, ComponentType<{ className?: string }>> = {
 
 export function MobileHeader() {
   const pathname = usePathname();
-  const { isAuthEnabled, role, signOut } = useAuth();
-  const visibleNavItems = filterNavItemsByRole(NAV_ITEMS, role, isAuthEnabled);
+  const { isAuthEnabled, role, accessScopes, signOut } = useAuth();
+  const visibleNavItems = filterNavItemsByRole(NAV_ITEMS, role, isAuthEnabled, accessScopes);
 
   const activeTitle =
     visibleNavItems.find((item) =>

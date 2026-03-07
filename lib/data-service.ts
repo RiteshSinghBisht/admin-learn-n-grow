@@ -4,8 +4,10 @@ import {
   mockFinances,
   mockStudents,
 } from "@/lib/data";
+import { normalizeAccessScopes } from "@/lib/access-control";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type {
+  AppAccessScope,
   AppDataSnapshot,
   AttendanceDraft,
   AttendanceRecord,
@@ -83,7 +85,8 @@ interface StudentMetaRow {
 interface UserAccessRow {
   user_id: string;
   email: string | null;
-  role: UserAccessRole | "teacher" | null;
+  role: UserAccessRole | "students_only" | "teacher" | null;
+  access_scopes?: string[] | null;
   assigned_teachers?: string[] | null;
   created_at: string | null;
 }
@@ -93,6 +96,7 @@ interface CreateUserApiPayload {
   userId?: string;
   email?: string;
   role?: UserAccessRole;
+  accessScopes?: AppAccessScope[];
   assignedTeachers?: string[];
   createdAt?: string;
 }
@@ -252,10 +256,29 @@ function normalizeUserAccessRole(role: UserAccessRow["role"]): UserAccessRole | 
   if (role === "admin") {
     return "admin";
   }
-  if (role === "students_only" || role === "teacher") {
-    return "students_only";
+
+  if (role === "member" || role === "students_only" || role === "teacher") {
+    return "member";
   }
+
   return null;
+}
+
+function normalizeUserAccessScopes(row: UserAccessRow) {
+  if (row.role === "admin") {
+    return [];
+  }
+
+  const scopes = normalizeAccessScopes(row.access_scopes);
+  if (scopes.length > 0) {
+    return scopes;
+  }
+
+  if (row.role === "students_only" || row.role === "teacher") {
+    return ["students"] satisfies AppAccessScope[];
+  }
+
+  return [];
 }
 
 export interface AppDataService {
@@ -271,7 +294,12 @@ export interface AppDataService {
   updateProfile(input: BusinessProfile): Promise<BusinessProfile>;
   resetAllData(): Promise<AppDataSnapshot>;
   listUserAccess(): Promise<UserAccess[]>;
-  updateUserAccessRole(userId: string, role: UserAccessRole, assignedTeachers?: string[]): Promise<void>;
+  updateUserAccessRole(
+    userId: string,
+    role: UserAccessRole,
+    accessScopes?: AppAccessScope[],
+    assignedTeachers?: string[],
+  ): Promise<void>;
   createUserAccess(input: CreateUserAccessInput): Promise<UserAccess>;
   deleteUserAccess(userId: string, mode: UserDeleteMode): Promise<void>;
 }
@@ -283,6 +311,7 @@ class MockAppDataService implements AppDataService {
       userId: "mock-owner",
       email: "owner@learnngrow.app",
       role: "admin",
+      accessScopes: [],
       assignedTeachers: [],
       createdAt: new Date().toISOString(),
     },
@@ -447,14 +476,24 @@ class MockAppDataService implements AppDataService {
     return deepClone(this.mockUserAccess);
   }
 
-  async updateUserAccessRole(userId: string, role: UserAccessRole, assignedTeachers: string[] = []) {
-    const normalizedTeachers = role === "students_only" ? normalizeTeacherNames(assignedTeachers) : [];
+  async updateUserAccessRole(
+    userId: string,
+    role: UserAccessRole,
+    accessScopes: AppAccessScope[] = [],
+    assignedTeachers: string[] = [],
+  ) {
+    const normalizedScopes = role === "admin" ? [] : normalizeAccessScopes(accessScopes);
+    const normalizedTeachers =
+      role === "admin" || !normalizedScopes.includes("students")
+        ? []
+        : normalizeTeacherNames(assignedTeachers);
     const index = this.mockUserAccess.findIndex((item) => item.userId === userId);
     if (index === -1) {
       this.mockUserAccess.push({
         userId,
         email: "new.user@example.com",
         role,
+        accessScopes: normalizedScopes,
         assignedTeachers: normalizedTeachers,
         createdAt: new Date().toISOString(),
       });
@@ -464,12 +503,14 @@ class MockAppDataService implements AppDataService {
     this.mockUserAccess[index] = {
       ...this.mockUserAccess[index],
       role,
+      accessScopes: normalizedScopes,
       assignedTeachers: normalizedTeachers,
     };
   }
 
   async createUserAccess(input: CreateUserAccessInput) {
     const email = input.email.trim().toLowerCase();
+    const normalizedScopes = input.role === "admin" ? [] : normalizeAccessScopes(input.accessScopes);
     if (!email) {
       throw new Error("Email is required.");
     }
@@ -487,8 +528,11 @@ class MockAppDataService implements AppDataService {
       userId: createId("usr"),
       email,
       role: input.role,
+      accessScopes: normalizedScopes,
       assignedTeachers:
-        input.role === "students_only" ? normalizeTeacherNames(input.assignedTeachers) : [],
+        input.role === "admin" || !normalizedScopes.includes("students")
+          ? []
+          : normalizeTeacherNames(input.assignedTeachers),
       createdAt: new Date().toISOString(),
     };
 
@@ -503,7 +547,7 @@ class MockAppDataService implements AppDataService {
     }
 
     this.mockUserAccess = this.mockUserAccess.map((item) =>
-      item.userId === userId ? { ...item, role: null, assignedTeachers: [] } : item,
+      item.userId === userId ? { ...item, role: null, accessScopes: [], assignedTeachers: [] } : item,
     );
   }
 }
@@ -1191,67 +1235,95 @@ class SupabaseAppDataService implements AppDataService {
   }
 
   async listUserAccess() {
-    const client = this.getClient();
-    let data: UserAccessRow[] | null = null;
-    let error: { message: string } | null = null;
+    const accessToken = await this.getCurrentAccessToken();
+    let response: Response;
 
     try {
-      const response = await client.rpc("list_manageable_users");
-      data = response.data as UserAccessRow[] | null;
-      error = response.error as { message: string } | null;
+      response = await fetch("/api/admin/users", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
     } catch (transportError) {
       throw new Error(formatTransportFailure("load users and access roles", transportError));
     }
 
-    if (error) {
-      throw new Error(`Failed to load users and access roles: ${error.message}`);
+    let payload: { message?: string; data?: UserAccessRow[] } = {};
+    try {
+      const parsed = (await response.json()) as unknown;
+      if (parsed && typeof parsed === "object") {
+        payload = parsed as { message?: string; data?: UserAccessRow[] };
+      }
+    } catch {
+      payload = {};
     }
 
-    return ((data ?? []) as UserAccessRow[]).map((row) => ({
+    if (!response.ok) {
+      const message = payload.message ?? `Request failed with status ${response.status}.`;
+      throw new Error(`Failed to load users and access roles: ${message}`);
+    }
+
+    return ((payload.data ?? []) as UserAccessRow[]).map((row) => ({
       userId: row.user_id,
       email: row.email?.trim() || "No email",
       role: normalizeUserAccessRole(row.role),
+      accessScopes: normalizeUserAccessScopes(row),
       assignedTeachers: normalizeTeacherNames(row.assigned_teachers),
       createdAt: row.created_at ?? new Date().toISOString(),
     }));
   }
 
-  async updateUserAccessRole(userId: string, role: UserAccessRole, assignedTeachers: string[] = []) {
-    const client = this.getClient();
-    const normalizedTeachers = role === "students_only" ? normalizeTeacherNames(assignedTeachers) : [];
-    let error: { message: string } | null = null;
+  async updateUserAccessRole(
+    userId: string,
+    role: UserAccessRole,
+    accessScopes: AppAccessScope[] = [],
+    assignedTeachers: string[] = [],
+  ) {
+    const normalizedScopes = role === "admin" ? [] : normalizeAccessScopes(accessScopes);
+    const normalizedTeachers =
+      role === "admin" || !normalizedScopes.includes("students")
+        ? []
+        : normalizeTeacherNames(assignedTeachers);
+    const accessToken = await this.getCurrentAccessToken();
+    let response: Response;
 
     try {
-      const response = await client.rpc("upsert_user_role", {
-        p_user_id: userId,
-        p_role: role,
-        p_assigned_teachers: normalizedTeachers,
+      response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          role,
+          accessScopes: normalizedScopes,
+          assignedTeachers: normalizedTeachers,
+        }),
       });
-      error = response.error as { message: string } | null;
-
-      if (
-        error &&
-        (error.message.includes("function upsert_user_role(uuid, text, text[]) does not exist") ||
-          error.message.includes("Could not find the function public.upsert_user_role"))
-      ) {
-        const fallbackResponse = await client.rpc("upsert_user_role", {
-          p_user_id: userId,
-          p_role: role,
-        });
-        error = fallbackResponse.error as { message: string } | null;
-      }
     } catch (transportError) {
       throw new Error(formatTransportFailure("update user access role", transportError));
     }
 
-    if (error) {
-      throw new Error(`Failed to update user access role: ${error.message}`);
+    let payload: CreateUserApiPayload = {};
+    try {
+      const parsed = (await response.json()) as unknown;
+      if (parsed && typeof parsed === "object") {
+        payload = parsed as CreateUserApiPayload;
+      }
+    } catch {
+      payload = {};
+    }
+
+    if (!response.ok) {
+      const message = payload?.message ?? `Request failed with status ${response.status}.`;
+      throw new Error(`Failed to update user access role: ${message}`);
     }
   }
 
   async createUserAccess(input: CreateUserAccessInput) {
     const email = input.email.trim().toLowerCase();
     const password = input.password;
+    const normalizedScopes = input.role === "admin" ? [] : normalizeAccessScopes(input.accessScopes);
 
     if (!email) {
       throw new Error("Email is required.");
@@ -1275,8 +1347,11 @@ class SupabaseAppDataService implements AppDataService {
           email,
           password,
           role: input.role,
+          accessScopes: normalizedScopes,
           assignedTeachers:
-            input.role === "students_only" ? normalizeTeacherNames(input.assignedTeachers) : [],
+            input.role === "admin" || !normalizedScopes.includes("students")
+              ? []
+              : normalizeTeacherNames(input.assignedTeachers),
         }),
       });
     } catch (transportError) {
@@ -1307,6 +1382,7 @@ class SupabaseAppDataService implements AppDataService {
       userId: payload.userId,
       email: payload.email,
       role: payload.role,
+      accessScopes: normalizeAccessScopes(payload.accessScopes),
       assignedTeachers: normalizeTeacherNames(payload.assignedTeachers),
       createdAt: payload.createdAt,
     };

@@ -3,7 +3,12 @@
 import * as React from "react";
 import type { Session, User } from "@supabase/supabase-js";
 
-import type { AppRole } from "@/lib/access-control";
+import {
+  hasAccessScope as hasScope,
+  normalizeAccessScopes,
+  type AppRole,
+} from "@/lib/access-control";
+import type { AppAccessScope } from "@/lib/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 const isAuthEnabled = process.env.NEXT_PUBLIC_USE_SUPABASE === "true" && isSupabaseConfigured;
@@ -30,7 +35,8 @@ function formatAuthTransportError(action: string, error: unknown) {
 }
 
 interface AppUserRoleRow {
-  role: AppRole | "teacher" | null;
+  role: AppRole | "students_only" | "teacher" | null;
+  access_scopes?: string[] | null;
   assigned_teachers?: string[] | null;
 }
 
@@ -61,14 +67,53 @@ function isMissingAssignedTeachersColumnError(message: string) {
   );
 }
 
+function isMissingAccessScopesColumnError(message: string) {
+  return (
+    message.includes("Could not find the 'access_scopes' column of 'app_user_roles'") ||
+    message.includes("column app_user_roles.access_scopes does not exist")
+  );
+}
+
+function isInvalidRefreshTokenError(message: string) {
+  const normalizedMessage = message.toLowerCase();
+
+  return (
+    normalizedMessage.includes("invalid refresh token") ||
+    normalizedMessage.includes("refresh token not found")
+  );
+}
+
 function normalizeStoredRole(role: AppUserRoleRow["role"]): AppRole | null {
   if (role === "admin") {
     return "admin";
   }
-  if (role === "students_only" || role === "teacher") {
-    return "students_only";
+
+  if (role === "member" || role === "students_only" || role === "teacher") {
+    return "member";
   }
+
   return null;
+}
+
+function normalizeStoredAccessScopes(row: AppUserRoleRow | null) {
+  if (!row) {
+    return [];
+  }
+
+  if (row.role === "admin") {
+    return [];
+  }
+
+  const scopes = normalizeAccessScopes(row.access_scopes);
+  if (scopes.length > 0) {
+    return scopes;
+  }
+
+  if (row.role === "students_only" || row.role === "teacher") {
+    return ["students"] satisfies AppAccessScope[];
+  }
+
+  return [];
 }
 
 interface AuthContextValue {
@@ -78,7 +123,9 @@ interface AuthContextValue {
   user: User | null;
   session: Session | null;
   role: AppRole | null;
+  accessScopes: AppAccessScope[];
   assignedTeachers: string[];
+  hasAccessScope: (scope: AppAccessScope) => boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshRole: () => Promise<void>;
@@ -94,13 +141,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = React.useState<Session | null>(null);
   const [user, setUser] = React.useState<User | null>(null);
   const [role, setRole] = React.useState<AppRole | null>(isAuthEnabled ? null : "admin");
+  const [accessScopes, setAccessScopes] = React.useState<AppAccessScope[]>([]);
   const [assignedTeachers, setAssignedTeachers] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(isAuthEnabled);
   const [roleLoading, setRoleLoading] = React.useState(isAuthEnabled);
 
+  const resetAuthState = React.useCallback((nextRole: AppRole | null, nextAccessScopes: AppAccessScope[] = []) => {
+    setSession(null);
+    setUser(null);
+    setRole(nextRole);
+    setAccessScopes(nextAccessScopes);
+    setAssignedTeachers([]);
+    setLoading(false);
+    setRoleLoading(false);
+  }, []);
+
   const loadRole = React.useCallback(async (userId: string) => {
     if (!isAuthEnabled || !supabase) {
       setRole("admin");
+      setAccessScopes([]);
       setAssignedTeachers([]);
       setRoleLoading(false);
       return;
@@ -113,13 +172,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await supabase
         .from("app_user_roles")
-        .select("role, assigned_teachers")
+        .select("role, access_scopes, assigned_teachers")
         .eq("user_id", userId)
         .maybeSingle();
       data = response.data as AppUserRoleRow | null;
       error = response.error as { message: string } | null;
 
-      if (error && isMissingAssignedTeachersColumnError(error.message)) {
+      if (error && (isMissingAssignedTeachersColumnError(error.message) || isMissingAccessScopesColumnError(error.message))) {
         const fallback = await supabase
           .from("app_user_roles")
           .select("role")
@@ -137,22 +196,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     if (error) {
       setRole(null);
+      setAccessScopes([]);
       setAssignedTeachers([]);
       setRoleLoading(false);
       throw new Error(`Failed to load user role: ${error.message}`);
     }
 
     setRole(normalizeStoredRole(data?.role ?? null));
+    setAccessScopes(normalizeStoredAccessScopes(data));
     setAssignedTeachers(normalizeTeacherNames(data?.assigned_teachers));
     setRoleLoading(false);
   }, []);
 
   React.useEffect(() => {
     if (!isAuthEnabled || !supabase) {
-      setLoading(false);
-      setRoleLoading(false);
-      setRole("admin");
-      setAssignedTeachers([]);
+      resetAuthState("admin");
       return;
     }
 
@@ -170,12 +228,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (!isMounted) {
           return;
         }
-        setSession(null);
-        setUser(null);
-        setRole(null);
-        setAssignedTeachers([]);
-        setLoading(false);
-        setRoleLoading(false);
+        resetAuthState(null);
         console.error(formatAuthTransportError("load session", transportError));
         return;
       }
@@ -185,6 +238,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (error) {
+        if (isInvalidRefreshTokenError(error.message)) {
+          await client.auth.signOut({ scope: "local" });
+
+          if (!isMounted) {
+            return;
+          }
+
+          resetAuthState(null);
+          return;
+        }
+
         console.error("Failed to load auth session:", error.message);
       }
 
@@ -197,6 +261,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (!nextUser) {
         setRole(null);
+        setAccessScopes([]);
         setAssignedTeachers([]);
         setRoleLoading(false);
         return;
@@ -236,7 +301,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadRole]);
+  }, [loadRole, resetAuthState]);
 
   const signIn = React.useCallback(async (email: string, password: string) => {
     if (!isAuthEnabled || !supabase) {
@@ -261,12 +326,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signOut = React.useCallback(async () => {
     if (!isAuthEnabled || !supabase) {
-      setSession(null);
-      setUser(null);
-      setRole("admin");
-      setAssignedTeachers([]);
-      setLoading(false);
-      setRoleLoading(false);
+      resetAuthState("admin");
       return;
     }
 
@@ -278,13 +338,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       throw new Error(formatAuthTransportError("sign out", transportError));
     }
     if (error) {
+      if (isInvalidRefreshTokenError(error.message)) {
+        await supabase.auth.signOut({ scope: "local" });
+        resetAuthState(null);
+        return;
+      }
+
       throw new Error(error.message);
     }
-  }, []);
+
+    resetAuthState(null);
+  }, [resetAuthState]);
 
   const refreshRole = React.useCallback(async () => {
     if (!user) {
       setRole(null);
+      setAccessScopes([]);
       setAssignedTeachers([]);
       setRoleLoading(false);
       return;
@@ -301,12 +370,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       user,
       session,
       role,
+      accessScopes,
       assignedTeachers,
+      hasAccessScope: (scope) => role === "admin" || hasScope(accessScopes, scope),
       signIn,
       signOut,
       refreshRole,
     }),
-    [assignedTeachers, loading, refreshRole, role, roleLoading, session, signIn, signOut, user],
+    [accessScopes, assignedTeachers, loading, refreshRole, role, roleLoading, session, signIn, signOut, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

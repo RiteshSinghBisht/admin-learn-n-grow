@@ -17,9 +17,10 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isAuthEnabled, loading: authLoading, roleLoading, user, role, signOut } = useAuth();
+  const { isAuthEnabled, loading: authLoading, roleLoading, user, role, accessScopes, signOut } = useAuth();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
   const onPublicRoute = isPublicPath(pathname);
+  const isWideCanvasPage = pathname === "/tasks";
 
   React.useEffect(() => {
     const storedValue = window.localStorage.getItem("sidebar-collapsed");
@@ -57,7 +58,7 @@ export function AppShell({ children }: AppShellProps) {
         return;
       }
 
-      router.replace(getDefaultPathForRole(role ?? "students_only"));
+      router.replace(getDefaultPathForRole(role ?? "member", accessScopes));
       return;
     }
 
@@ -65,10 +66,10 @@ export function AppShell({ children }: AppShellProps) {
       return;
     }
 
-    if (!canRoleAccessPath(role, pathname)) {
-      router.replace(getDefaultPathForRole(role));
+    if (!canRoleAccessPath(role, pathname, accessScopes)) {
+      router.replace(getDefaultPathForRole(role, accessScopes));
     }
-  }, [authLoading, isAuthEnabled, onPublicRoute, pathname, role, roleLoading, router, user]);
+  }, [accessScopes, authLoading, isAuthEnabled, onPublicRoute, pathname, role, roleLoading, router, user]);
 
   if (onPublicRoute) {
     return <>{children}</>;
@@ -110,7 +111,7 @@ export function AppShell({ children }: AppShellProps) {
     );
   }
 
-  if (isAuthEnabled && role && !canRoleAccessPath(role, pathname)) {
+  if (isAuthEnabled && role && !canRoleAccessPath(role, pathname, accessScopes)) {
     return null;
   }
 
@@ -138,7 +139,14 @@ export function AppShell({ children }: AppShellProps) {
         )}
       >
         <MobileHeader />
-        <main className="container relative max-w-[1440px] py-7 md:py-9 lg:py-10">
+        <main
+          className={cn(
+            "relative mx-auto w-full",
+            isWideCanvasPage
+              ? "max-w-[1760px] px-4 pb-7 pt-3 md:px-6 md:pb-9 md:pt-4 xl:px-8 xl:pb-10 xl:pt-4"
+              : "container max-w-[1440px] py-7 md:py-9 lg:py-10",
+          )}
+        >
           <div className="animate-fade-up">{children}</div>
         </main>
       </div>

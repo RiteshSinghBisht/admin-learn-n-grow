@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { useAuth } from "@/components/providers/auth-provider";
+import { hasAccessScope } from "@/lib/access-control";
 import { dataService } from "@/lib/data-service";
 import type {
   AppDataSnapshot,
@@ -68,7 +69,7 @@ function formatMonthLabel(monthKey: string) {
 }
 
 export function AppDataProvider({ children }: AppDataProviderProps) {
-  const { isAuthEnabled, loading: authLoading, user, role, assignedTeachers } = useAuth();
+  const { isAuthEnabled, loading: authLoading, user, role, accessScopes, assignedTeachers } = useAuth();
   const [snapshot, setSnapshot] = React.useState<AppDataSnapshot>(defaultSnapshot);
   const [loading, setLoading] = React.useState(true);
   const [currentMonthKey, setCurrentMonthKey] = React.useState(() => formatMonthKey(new Date()));
@@ -76,8 +77,17 @@ export function AppDataProvider({ children }: AppDataProviderProps) {
 
   const applyRoleScope = React.useCallback(
     (nextSnapshot: AppDataSnapshot): AppDataSnapshot => {
-      if (!isAuthEnabled || role !== "students_only") {
+      if (!isAuthEnabled || role === "admin") {
         return nextSnapshot;
+      }
+
+      if (!hasAccessScope(accessScopes, "students")) {
+        return {
+          ...nextSnapshot,
+          students: [],
+          attendance: [],
+          finances: [],
+        };
       }
 
       const allowedTeachers = new Set(
@@ -122,7 +132,7 @@ export function AppDataProvider({ children }: AppDataProviderProps) {
         finances,
       };
     },
-    [assignedTeachers, isAuthEnabled, role],
+    [accessScopes, assignedTeachers, isAuthEnabled, role],
   );
 
   React.useEffect(() => {

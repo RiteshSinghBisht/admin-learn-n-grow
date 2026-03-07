@@ -39,7 +39,7 @@ interface CustomLinksSectionProps {
 }
 
 // Pre-defined icon options
-const ICON_OPTIONS = [
+const _ICON_OPTIONS = [
   { value: 'Link', label: 'Link', icon: LinkIcon },
   { value: 'ExternalLink', label: 'External', icon: ExternalLink },
 ];
