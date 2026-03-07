@@ -584,11 +584,11 @@ export function AttendanceTab({
                 <CircleAlert className="h-4 w-4 shrink-0" />
               )
             ) : null}
-            <span>
-              {saveToast
-                ? saveToast.message
-                : "Click any student name to open their monthly attendance calendar."}
-            </span>
+              <span>
+                {saveToast
+                  ? saveToast.message
+                  : "Select a student name to review their monthly attendance calendar."}
+              </span>
           </p>
           <Button onClick={handleSave} disabled={saving || !activeBatchStudents.length}>
             {saving ? "Saving..." : "Save Attendance"}
@@ -729,7 +729,7 @@ export function AttendanceTab({
           </div>
         ) : (
           <div className="rounded-2xl border border-border/80 bg-white/60 p-4 text-sm text-muted-foreground dark:border-white/15 dark:bg-white/[0.04]">
-            Click on a student name to open the monthly attendance calendar.
+            The monthly attendance calendar will appear here after you select a student.
           </div>
         )}
       </CardContent>
